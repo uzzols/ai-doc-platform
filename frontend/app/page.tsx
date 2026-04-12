@@ -34,7 +34,7 @@ export default function Home() {
   useEffect(() => {
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/health`)
       .then((res) => res.json())
-      .then((data) => setStatus(data.status))
+      .then(() => setStatus("Connected"))
       .catch(() => setStatus("Backend connection failed"));
   }, []);
 
@@ -133,7 +133,9 @@ export default function Home() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="bg-white rounded-xl shadow p-6">
           <h1 className="text-3xl font-bold mb-2">AI Document Platform</h1>
-          <p className="text-gray-700">Backend status: {status}</p>
+          <p className="text-gray-700">
+  Backend status: {status === "Connected" ? "Connected ✅" : status}
+</p>
         </div>
 
         <div className="bg-white rounded-xl shadow p-6 space-y-4">
