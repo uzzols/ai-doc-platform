@@ -38,9 +38,34 @@ export default function Home() {
       .catch(() => setStatus("Backend connection failed"));
   }, []);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0] || null;
+
+    if (!selectedFile) {
+      setFile(null);
+      return;
+    }
+
+    const isPdf =
+      selectedFile.type === "application/pdf" ||
+      selectedFile.name.toLowerCase().endsWith(".pdf");
+
+    if (!isPdf) {
+      setFile(null);
+      setUploadResult("Only PDF files are allowed.");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
+    setFile(selectedFile);
+    setUploadResult("");
+  };
+
   const handleUpload = async () => {
     if (!file) {
-      setUploadResult("Please choose a file first.");
+      setUploadResult("Please choose a PDF file first.");
       return;
     }
 
@@ -56,7 +81,14 @@ export default function Home() {
       });
 
       const data = await response.json();
-      setUploadResult(JSON.stringify(data, null, 2));
+
+      setUploadResult(
+        `Upload successful ✅
+File: ${data.filename}
+Type: ${data.file_type}
+Chunks created: ${data.chunks_created}`
+      );
+
       setAnswer("");
       setRetrievedChunks([]);
       setRetrievedCount(0);
@@ -104,8 +136,8 @@ export default function Home() {
       });
 
       const data = await response.json();
-
       const nextAnswer = data.answer || "";
+
       setAnswer(nextAnswer);
       setRetrievedChunks(data.retrieved_chunks || []);
       setRetrievedCount(data.retrieved_chunks_count || 0);
@@ -129,22 +161,25 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 py-10 px-4">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 py-10 px-4">
       <div className="max-w-5xl mx-auto space-y-6">
-        <div className="bg-white rounded-xl shadow p-6">
-          <h1 className="text-3xl font-bold mb-2">AI Document Platform</h1>
+        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+          <h1 className="text-3xl font-bold mb-2 text-gray-900">
+            AI Document Platform
+          </h1>
           <p className="text-gray-700">
-  Backend status: {status === "Connected" ? "Connected ✅" : status}
-</p>
+            Backend status: {status === "Connected" ? "Connected ✅" : status}
+          </p>
         </div>
 
-        <div className="bg-white rounded-xl shadow p-6 space-y-4">
-          <h2 className="text-xl font-semibold">1. Upload File</h2>
+        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900">1. Upload File</h2>
 
           <input
             type="file"
+            accept=".pdf,application/pdf"
             ref={fileInputRef}
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={handleFileChange}
             className="block"
             disabled={isUploading || isAsking}
           />
@@ -159,7 +194,7 @@ export default function Home() {
             <button
               onClick={handleUpload}
               disabled={!file || isUploading || isAsking}
-              className="px-4 py-2 bg-black text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isUploading ? "Uploading..." : "Upload File"}
             </button>
@@ -167,57 +202,71 @@ export default function Home() {
             <button
               onClick={handleClear}
               disabled={isUploading || isAsking}
-              className="px-4 py-2 bg-gray-300 text-black rounded hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Clear
             </button>
           </div>
 
+          {isUploading && (
+            <p className="text-sm text-blue-600">
+              Uploading and processing your PDF...
+            </p>
+          )}
+
           {uploadResult && (
             <div>
-              <h3 className="font-medium mb-2">Upload Result</h3>
-              <pre className="text-left text-sm bg-gray-100 p-4 rounded overflow-auto whitespace-pre-wrap break-words">
+              <h3 className="font-medium mb-2 text-gray-900">Upload Result</h3>
+              <div className="text-left text-sm bg-green-50 border border-green-200 text-green-800 p-4 rounded-lg whitespace-pre-wrap break-words">
                 {uploadResult}
-              </pre>
+              </div>
             </div>
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow p-6 space-y-4">
-          <h2 className="text-xl font-semibold">2. Ask AI</h2>
+        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900">2. Ask AI</h2>
 
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Ask a question about the uploaded file..."
-            className="w-full border rounded p-3 min-h-[120px]"
+            className="w-full border border-gray-300 rounded-lg p-3 min-h-[120px] focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={isAsking || isUploading}
           />
 
           <button
             onClick={handleAsk}
             disabled={isAsking || isUploading}
-            className="px-4 py-2 bg-black text-white rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isAsking ? "Thinking..." : "Ask AI"}
           </button>
+
+          {isAsking && (
+            <p className="text-sm text-blue-600">
+              AI is analyzing your document...
+            </p>
+          )}
         </div>
 
         {answer && (
-          <div className="bg-white rounded-xl shadow p-6">
-            <h2 className="text-xl font-semibold mb-3">Latest AI Answer</h2>
-            <div className="whitespace-pre-wrap break-words text-sm text-gray-800">
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+            <h2 className="text-xl font-semibold mb-3 text-gray-900">
+              Latest AI Answer
+            </h2>
+            <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-96 overflow-auto">
               {answer}
             </div>
           </div>
         )}
 
         {chatHistory.length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6 space-y-4">
-            <h2 className="text-xl font-semibold">Chat History</h2>
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+            <h2 className="text-xl font-semibold text-gray-900">Chat History</h2>
 
             {chatHistory.map((item, index) => (
-              <div key={index} className="border rounded p-4 space-y-2">
+              <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50">
                 <div>
                   <p className="text-sm font-semibold text-gray-900">Question</p>
                   <p className="text-sm text-gray-800 whitespace-pre-wrap">
@@ -237,13 +286,13 @@ export default function Home() {
         )}
 
         {retrievedChunks.length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6 space-y-4">
-            <h2 className="text-xl font-semibold">
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+            <h2 className="text-xl font-semibold text-gray-900">
               Retrieved Sources ({retrievedCount})
             </h2>
 
             {retrievedChunks.map((chunk, index) => (
-              <div key={index} className="bg-gray-100 rounded p-4">
+              <div key={index} className="bg-gray-100 rounded-lg p-4 border border-gray-200">
                 <h3 className="font-medium mb-2 text-sm text-gray-900">
                   {chunk.metadata.filename}
                   {chunk.metadata.file_type === "pdf" && chunk.metadata.page
