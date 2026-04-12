@@ -15,11 +15,10 @@ app = FastAPI(title="AI Document Platform API")
 
 app.add_middleware(
     CORSMiddleware,
-  allow_origins=[
-    "http://localhost:3000",
-    "https://your-frontend-app.vercel.app",
-]
-,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://ai-doc-platform-zeta.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
