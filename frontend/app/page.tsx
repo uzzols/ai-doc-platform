@@ -14,7 +14,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
 
   // 🔹 Backend URL (IMPORTANT)
-  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL;
 
   // 🔹 Upload File
   const handleUpload = async () => {
