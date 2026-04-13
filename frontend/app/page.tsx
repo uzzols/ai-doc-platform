@@ -1,4 +1,4 @@
-"use client";
+d"use client";
 
 import { useEffect, useRef, useState } from "react";
 
@@ -46,13 +46,19 @@ export default function Home() {
       return;
     }
 
-    const isPdf =
-      selectedFile.type === "application/pdf" ||
-      selectedFile.name.toLowerCase().endsWith(".pdf");
+    const fileName = selectedFile.name.toLowerCase();
 
-    if (!isPdf) {
+    const isPdf =
+      selectedFile.type === "application/pdf" || fileName.endsWith(".pdf");
+
+    const isCsv =
+      selectedFile.type === "text/csv" ||
+      selectedFile.type === "application/vnd.ms-excel" ||
+      fileName.endsWith(".csv");
+
+    if (!isPdf && !isCsv) {
       setFile(null);
-      setUploadResult("Only PDF files are allowed.");
+      setUploadResult("Only PDF and CSV files are allowed.");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -65,7 +71,7 @@ export default function Home() {
 
   const handleUpload = async () => {
     if (!file) {
-      setUploadResult("Please choose a PDF file first.");
+      setUploadResult("Please choose a PDF or CSV file first.");
       return;
     }
 
@@ -81,6 +87,11 @@ export default function Home() {
       });
 
       const data = await response.json();
+
+      if (!response.ok) {
+        setUploadResult(data.detail || "Upload failed.");
+        return;
+      }
 
       setUploadResult(
         `Upload successful ✅
@@ -177,7 +188,7 @@ Chunks created: ${data.chunks_created}`
 
           <input
             type="file"
-            accept=".pdf,application/pdf"
+            accept=".pdf,.csv,application/pdf,text/csv"
             ref={fileInputRef}
             onChange={handleFileChange}
             className="block"
@@ -210,7 +221,7 @@ Chunks created: ${data.chunks_created}`
 
           {isUploading && (
             <p className="text-sm text-blue-600">
-              Uploading and processing your PDF...
+              Uploading and processing your file...
             </p>
           )}
 
@@ -266,7 +277,10 @@ Chunks created: ${data.chunks_created}`
             <h2 className="text-xl font-semibold text-gray-900">Chat History</h2>
 
             {chatHistory.map((item, index) => (
-              <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50">
+              <div
+                key={index}
+                className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50"
+              >
                 <div>
                   <p className="text-sm font-semibold text-gray-900">Question</p>
                   <p className="text-sm text-gray-800 whitespace-pre-wrap">
@@ -292,7 +306,10 @@ Chunks created: ${data.chunks_created}`
             </h2>
 
             {retrievedChunks.map((chunk, index) => (
-              <div key={index} className="bg-gray-100 rounded-lg p-4 border border-gray-200">
+              <div
+                key={index}
+                className="bg-gray-100 rounded-lg p-4 border border-gray-200"
+              >
                 <h3 className="font-medium mb-2 text-sm text-gray-900">
                   {chunk.metadata.filename}
                   {chunk.metadata.file_type === "pdf" && chunk.metadata.page
