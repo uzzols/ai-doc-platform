@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+} from "@clerk/nextjs";
 
 type RetrievedChunk = {
   text: string;
@@ -183,159 +190,210 @@ Chunks created: ${data.chunks_created}`
     <main className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 py-10 px-4">
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
-          <h1 className="text-3xl font-bold mb-2 text-gray-900">
-            AI Document Platform
-          </h1>
-          <p className="text-gray-700">
-            Backend status: {status === "Connected" ? "Connected ✅" : status}
-          </p>
-          <p className="text-sm text-gray-500 mt-2">
-            Supports PDF, CSV, TXT, and DOCX files.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold mb-2 text-gray-900">
+                AI Document Platform
+              </h1>
+              <p className="text-gray-700">
+                Backend status: {status === "Connected" ? "Connected ✅" : status}
+              </p>
+              <p className="text-sm text-gray-500 mt-2">
+                Supports PDF, CSV, TXT, and DOCX files.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50">
+                    Sign In
+                  </button>
+                </SignInButton>
+
+                <SignUpButton mode="modal">
+                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    Sign Up
+                  </button>
+                </SignUpButton>
+              </SignedOut>
+
+              <SignedIn>
+                <UserButton />
+              </SignedIn>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900">1. Upload File</h2>
-
-          <input
-            type="file"
-            accept=".pdf,.csv,.txt,.docx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            className="block"
-            disabled={isUploading || isAsking}
-          />
-
-          {file && (
-            <p className="text-sm text-gray-700">
-              Selected file: <span className="font-medium">{file.name}</span>
+        <SignedOut>
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              Sign in to use the app
+            </h2>
+            <p className="text-gray-600 mb-4">
+              Please sign in or create an account to upload files and ask AI questions.
             </p>
-          )}
 
-          <div className="flex gap-2 mt-2">
+            <div className="flex gap-3">
+              <SignInButton mode="modal">
+                <button className="px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50">
+                  Sign In
+                </button>
+              </SignInButton>
+
+              <SignUpButton mode="modal">
+                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                  Sign Up
+                </button>
+              </SignUpButton>
+            </div>
+          </div>
+        </SignedOut>
+
+        <SignedIn>
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+            <h2 className="text-xl font-semibold text-gray-900">1. Upload File</h2>
+
+            <input
+              type="file"
+              accept=".pdf,.csv,.txt,.docx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="block"
+              disabled={isUploading || isAsking}
+            />
+
+            {file && (
+              <p className="text-sm text-gray-700">
+                Selected file: <span className="font-medium">{file.name}</span>
+              </p>
+            )}
+
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={handleUpload}
+                disabled={!file || isUploading || isAsking}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isUploading ? "Uploading..." : "Upload Document"}
+              </button>
+
+              <button
+                onClick={handleClear}
+                disabled={isUploading || isAsking}
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Clear
+              </button>
+            </div>
+
+            {isUploading && (
+              <p className="text-sm text-blue-600">
+                Uploading and processing your file...
+              </p>
+            )}
+
+            {uploadResult && (
+              <div>
+                <h3 className="font-medium mb-2 text-gray-900">Upload Result</h3>
+                <div className="text-left text-sm bg-green-50 border border-green-200 text-green-800 p-4 rounded-lg whitespace-pre-wrap break-words">
+                  {uploadResult}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+            <h2 className="text-xl font-semibold text-gray-900">2. Ask AI</h2>
+
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="Ask a question about the uploaded file..."
+              className="w-full border border-gray-300 rounded-lg p-3 min-h-[120px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isAsking || isUploading}
+            />
+
             <button
-              onClick={handleUpload}
-              disabled={!file || isUploading || isAsking}
+              onClick={handleAsk}
+              disabled={isAsking || isUploading}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isUploading ? "Uploading..." : "Upload Document"}
+              {isAsking ? "Thinking..." : "Ask AI"}
             </button>
 
-            <button
-              onClick={handleClear}
-              disabled={isUploading || isAsking}
-              className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Clear
-            </button>
+            {isAsking && (
+              <p className="text-sm text-blue-600">
+                AI is analyzing your document...
+              </p>
+            )}
           </div>
 
-          {isUploading && (
-            <p className="text-sm text-blue-600">
-              Uploading and processing your file...
-            </p>
-          )}
-
-          {uploadResult && (
-            <div>
-              <h3 className="font-medium mb-2 text-gray-900">Upload Result</h3>
-              <div className="text-left text-sm bg-green-50 border border-green-200 text-green-800 p-4 rounded-lg whitespace-pre-wrap break-words">
-                {uploadResult}
+          {answer && (
+            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+              <h2 className="text-xl font-semibold mb-3 text-gray-900">
+                Latest AI Answer
+              </h2>
+              <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-96 overflow-auto">
+                {answer}
               </div>
             </div>
           )}
-        </div>
 
-        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900">2. Ask AI</h2>
+          {chatHistory.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+              <h2 className="text-xl font-semibold text-gray-900">Chat History</h2>
 
-          <textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask a question about the uploaded file..."
-            className="w-full border border-gray-300 rounded-lg p-3 min-h-[120px] focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={isAsking || isUploading}
-          />
+              {chatHistory.map((item, index) => (
+                <div
+                  key={index}
+                  className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Question</p>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">
+                      {item.question}
+                    </p>
+                  </div>
 
-          <button
-            onClick={handleAsk}
-            disabled={isAsking || isUploading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isAsking ? "Thinking..." : "Ask AI"}
-          </button>
-
-          {isAsking && (
-            <p className="text-sm text-blue-600">
-              AI is analyzing your document...
-            </p>
-          )}
-        </div>
-
-        {answer && (
-          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
-            <h2 className="text-xl font-semibold mb-3 text-gray-900">
-              Latest AI Answer
-            </h2>
-            <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-96 overflow-auto">
-              {answer}
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Answer</p>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">
+                      {item.answer}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {chatHistory.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
-            <h2 className="text-xl font-semibold text-gray-900">Chat History</h2>
+          {retrievedChunks.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Retrieved Sources ({retrievedCount})
+              </h2>
 
-            {chatHistory.map((item, index) => (
-              <div
-                key={index}
-                className="border border-gray-200 rounded-lg p-4 space-y-2 bg-gray-50"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Question</p>
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">
-                    {item.question}
-                  </p>
+              {retrievedChunks.map((chunk, index) => (
+                <div
+                  key={index}
+                  className="bg-gray-100 rounded-lg p-4 border border-gray-200"
+                >
+                  <h3 className="font-medium mb-2 text-sm text-gray-900">
+                    {chunk.metadata.filename}
+                    {chunk.metadata.file_type === "pdf" && chunk.metadata.page
+                      ? ` — Page ${chunk.metadata.page}`
+                      : ""}
+                    {` — Chunk ${chunk.metadata.chunk_index}`}
+                  </h3>
+
+                  <pre className="whitespace-pre-wrap break-words text-sm text-gray-800">
+                    {chunk.text}
+                  </pre>
                 </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Answer</p>
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">
-                    {item.answer}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {retrievedChunks.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
-            <h2 className="text-xl font-semibold text-gray-900">
-              Retrieved Sources ({retrievedCount})
-            </h2>
-
-            {retrievedChunks.map((chunk, index) => (
-              <div
-                key={index}
-                className="bg-gray-100 rounded-lg p-4 border border-gray-200"
-              >
-                <h3 className="font-medium mb-2 text-sm text-gray-900">
-                  {chunk.metadata.filename}
-                  {chunk.metadata.file_type === "pdf" && chunk.metadata.page
-                    ? ` — Page ${chunk.metadata.page}`
-                    : ""}
-                  {` — Chunk ${chunk.metadata.chunk_index}`}
-                </h3>
-
-                <pre className="whitespace-pre-wrap break-words text-sm text-gray-800">
-                  {chunk.text}
-                </pre>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </SignedIn>
       </div>
     </main>
   );
