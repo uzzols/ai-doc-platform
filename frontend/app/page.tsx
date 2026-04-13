@@ -56,9 +56,17 @@ export default function Home() {
       selectedFile.type === "application/vnd.ms-excel" ||
       fileName.endsWith(".csv");
 
-    if (!isPdf && !isCsv) {
+    const isTxt =
+      selectedFile.type === "text/plain" || fileName.endsWith(".txt");
+
+    const isDocx =
+      selectedFile.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      fileName.endsWith(".docx");
+
+    if (!isPdf && !isCsv && !isTxt && !isDocx) {
       setFile(null);
-      setUploadResult("Only PDF and CSV files are allowed.");
+      setUploadResult("Only PDF, CSV, TXT, and DOCX files are allowed.");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -71,7 +79,7 @@ export default function Home() {
 
   const handleUpload = async () => {
     if (!file) {
-      setUploadResult("Please choose a PDF or CSV file first.");
+      setUploadResult("Please choose a PDF, CSV, TXT, or DOCX file first.");
       return;
     }
 
@@ -89,7 +97,7 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        setUploadResult(data.detail || "Upload failed.");
+        setUploadResult(data.detail || data.error || "Upload failed.");
         return;
       }
 
@@ -181,6 +189,9 @@ Chunks created: ${data.chunks_created}`
           <p className="text-gray-700">
             Backend status: {status === "Connected" ? "Connected ✅" : status}
           </p>
+          <p className="text-sm text-gray-500 mt-2">
+            Supports PDF, CSV, TXT, and DOCX files.
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 space-y-4">
@@ -188,7 +199,7 @@ Chunks created: ${data.chunks_created}`
 
           <input
             type="file"
-            accept=".pdf,.csv,application/pdf,text/csv"
+            accept=".pdf,.csv,.txt,.docx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ref={fileInputRef}
             onChange={handleFileChange}
             className="block"
@@ -207,7 +218,7 @@ Chunks created: ${data.chunks_created}`
               disabled={!file || isUploading || isAsking}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isUploading ? "Uploading..." : "Upload File"}
+              {isUploading ? "Uploading..." : "Upload Document"}
             </button>
 
             <button
