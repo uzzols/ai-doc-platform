@@ -51,7 +51,9 @@ def health_check():
 def chunk_text(text, chunk_size=1000):
     chunks = []
     for i in range(0, len(text), chunk_size):
-        chunks.append(text[i:i + chunk_size])
+        chunk = text[i:i + chunk_size]
+        if chunk.strip():
+            chunks.append(chunk)
     return chunks
 
 
@@ -75,52 +77,65 @@ async def upload_file(file: UploadFile = File(...)):
 
     contents = await file.read()
 
+    stored_text = ""
+    document_chunks = []
+    chunk_embeddings = []
+    chunk_metadata = []
+    current_filename = ""
+    current_file_type = ""
+
     if file.filename.lower().endswith(".csv"):
-        df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
-        stored_text = df.to_csv(index=False)
+        try:
+            try:
+                df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+            except Exception:
+                df = pd.read_csv(io.StringIO(contents.decode("latin-1")))
 
-        current_filename = file.filename
-        current_file_type = "csv"
+            stored_text = df.to_csv(index=False)
 
-        document_chunks = chunk_text(stored_text)
-        chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
-        chunk_metadata = [
-            {
+            current_filename = file.filename
+            current_file_type = "csv"
+
+            document_chunks = chunk_text(stored_text)
+            chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
+            chunk_metadata = [
+                {
+                    "filename": file.filename,
+                    "file_type": "csv",
+                    "page": None,
+                    "chunk_index": i + 1
+                }
+                for i in range(len(document_chunks))
+            ]
+
+            return {
                 "filename": file.filename,
                 "file_type": "csv",
-                "page": None,
-                "chunk_index": i + 1
+                "columns": list(df.columns),
+                "rows_preview": df.head(5).to_dict(),
+                "chunks_created": len(document_chunks)
             }
-            for i in range(len(document_chunks))
-        ]
 
-        return {
-            "filename": file.filename,
-            "file_type": "csv",
-            "columns": list(df.columns),
-            "rows": df.head(5).to_dict(),
-            "chunks_created": len(document_chunks)
-        }
+        except Exception as e:
+            return {
+                "error": f"CSV processing failed: {str(e)}"
+            }
 
     if file.filename.lower().endswith(".pdf"):
-        pdf_document = fitz.open(stream=contents, filetype="pdf")
-        extracted_text = ""
+        try:
+            pdf_document = fitz.open(stream=contents, filetype="pdf")
+            extracted_text = ""
 
-        current_filename = file.filename
-        current_file_type = "pdf"
+            current_filename = file.filename
+            current_file_type = "pdf"
 
-        document_chunks = []
-        chunk_embeddings = []
-        chunk_metadata = []
+            for page_number, page in enumerate(pdf_document, start=1):
+                page_text = page.get_text()
+                extracted_text += page_text
 
-        for page_number, page in enumerate(pdf_document, start=1):
-            page_text = page.get_text()
-            extracted_text += page_text
+                page_chunks = chunk_text(page_text)
 
-            page_chunks = chunk_text(page_text)
-
-            for chunk_idx, chunk in enumerate(page_chunks, start=1):
-                if chunk.strip():
+                for chunk_idx, chunk in enumerate(page_chunks, start=1):
                     document_chunks.append(chunk)
                     chunk_metadata.append(
                         {
@@ -131,28 +146,26 @@ async def upload_file(file: UploadFile = File(...)):
                         }
                     )
 
-        chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
-        stored_text = extracted_text
+            chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
+            stored_text = extracted_text
 
-        return {
-            "filename": file.filename,
-            "file_type": "pdf",
-            "text_preview": extracted_text[:2000],
-            "text_length": len(extracted_text),
-            "chunks_created": len(document_chunks)
-        }
+            return {
+                "filename": file.filename,
+                "file_type": "pdf",
+                "text_preview": extracted_text[:2000],
+                "text_length": len(extracted_text),
+                "chunks_created": len(document_chunks)
+            }
 
-    stored_text = ""
-    document_chunks = []
-    chunk_embeddings = []
-    chunk_metadata = []
-    current_filename = ""
-    current_file_type = ""
+        except Exception as e:
+            return {
+                "error": f"PDF processing failed: {str(e)}"
+            }
 
     return {
         "filename": file.filename,
         "content_type": file.content_type,
-        "message": "File uploaded but not processed"
+        "message": "Only PDF and CSV files are supported"
     }
 
 
