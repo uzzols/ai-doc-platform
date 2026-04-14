@@ -7,3 +7,4 @@ pandas
 PyMuPDF
 numpy
 python-docx
+supabase

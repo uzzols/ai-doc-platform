@@ -1,9 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
 from docx import Document
+from supabase import create_client, Client
 import pandas as pd
 import io
 import fitz
@@ -14,6 +15,7 @@ load_dotenv()
 
 app = FastAPI(title="AI Document Platform API")
 
+# ✅ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -25,45 +27,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-stored_text = ""
+# ✅ Supabase
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+if not supabase_url or not supabase_key:
+    raise ValueError("Missing Supabase environment variables")
+
+supabase: Client = create_client(supabase_url, supabase_key)
+
+print("🔥 SUPABASE URL:", supabase_url)
+
+# Memory storage
 document_chunks = []
 chunk_embeddings = []
-chunk_metadata = []
-current_filename = ""
-current_file_type = ""
 
-
+# ---------- MODELS ----------
 class AskRequest(BaseModel):
     question: str
+    user_id: str
 
 
+# ---------- DEBUG ROUTE ----------
+@app.get("/debug-supabase")
+def debug_supabase():
+    try:
+        test = supabase.table("chat_history").insert({
+            "user_id": "debug-user",
+            "question": "test question",
+            "answer": "test answer"
+        }).execute()
+
+        return {
+            "success": True,
+            "result": str(test),
+            "supabase_url": supabase_url
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "supabase_url": supabase_url
+        }
+
+
+# ---------- HEALTH ----------
 @app.get("/")
-def read_root():
-    return {"message": "Backend is running"}
-
-
-@app.get("/health")
-def health_check():
+def root():
     return {"status": "ok"}
 
 
-def chunk_text(text, chunk_size=1000):
-    chunks = []
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i:i + chunk_size]
-        if chunk.strip():
-            chunks.append(chunk)
-    return chunks
+# ---------- HELPERS ----------
+def chunk_text(text, size=1000):
+    return [text[i:i + size] for i in range(0, len(text), size) if text[i:i + size].strip()]
 
 
 def get_embedding(text):
-    response = client.embeddings.create(
+    res = client.embeddings.create(
         model="text-embedding-3-small",
         input=text
     )
-    return response.data[0].embedding
+    return res.data[0].embedding
 
 
 def cosine_similarity(a, b):
@@ -72,217 +100,94 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 
-def process_chunks(chunks, filename, file_type, page=None):
-    processed_chunks = []
-    processed_metadata = []
-
-    for idx, chunk in enumerate(chunks, start=1):
-        if chunk.strip():
-            processed_chunks.append(chunk)
-            processed_metadata.append(
-                {
-                    "filename": filename,
-                    "file_type": file_type,
-                    "page": page,
-                    "chunk_index": idx
-                }
-            )
-
-    return processed_chunks, processed_metadata
-
-
+# ---------- UPLOAD ----------
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    global stored_text, document_chunks, chunk_embeddings, chunk_metadata, current_filename, current_file_type
+async def upload_file(
+    file: UploadFile = File(...),
+    user_id: str = Form(...)
+):
+    global document_chunks, chunk_embeddings
 
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided.")
+        raise HTTPException(status_code=400, detail="No file")
 
-    filename = file.filename
-    lower_name = filename.lower()
     contents = await file.read()
+    filename = file.filename.lower()
 
-    stored_text = ""
-    document_chunks = []
-    chunk_embeddings = []
-    chunk_metadata = []
-    current_filename = ""
-    current_file_type = ""
-
-    if lower_name.endswith(".csv"):
-        try:
-            try:
-                df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
-            except Exception:
-                df = pd.read_csv(io.StringIO(contents.decode("latin-1")))
-
-            stored_text = df.to_csv(index=False)
-
-            current_filename = filename
-            current_file_type = "csv"
-
-            document_chunks = chunk_text(stored_text)
-            chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
-            chunk_metadata = [
-                {
-                    "filename": filename,
-                    "file_type": "csv",
-                    "page": None,
-                    "chunk_index": i + 1
-                }
-                for i in range(len(document_chunks))
-            ]
-
-            return {
-                "filename": filename,
-                "file_type": "csv",
-                "columns": list(df.columns),
-                "rows_preview": df.head(5).to_dict(),
-                "chunks_created": len(document_chunks)
-            }
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"CSV processing failed: {str(e)}")
-
-    if lower_name.endswith(".pdf"):
-        try:
-            pdf_document = fitz.open(stream=contents, filetype="pdf")
-            extracted_text = ""
-
-            current_filename = filename
-            current_file_type = "pdf"
-
-            for page_number, page in enumerate(pdf_document, start=1):
-                page_text = page.get_text()
-                extracted_text += page_text + "\n"
-
-                page_chunks = chunk_text(page_text)
-                page_processed_chunks, page_processed_metadata = process_chunks(
-                    page_chunks,
-                    filename,
-                    "pdf",
-                    page=page_number
-                )
-
-                document_chunks.extend(page_processed_chunks)
-                chunk_metadata.extend(page_processed_metadata)
-
-            stored_text = extracted_text
-            chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
-
-            return {
-                "filename": filename,
-                "file_type": "pdf",
-                "text_preview": extracted_text[:2000],
-                "text_length": len(extracted_text),
-                "chunks_created": len(document_chunks)
-            }
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"PDF processing failed: {str(e)}")
-
-    if lower_name.endswith(".txt"):
-        try:
-            try:
-                extracted_text = contents.decode("utf-8")
-            except Exception:
-                extracted_text = contents.decode("latin-1")
-
-            current_filename = filename
-            current_file_type = "txt"
-            stored_text = extracted_text
-
-            document_chunks = chunk_text(extracted_text)
-            chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
-            chunk_metadata = [
-                {
-                    "filename": filename,
-                    "file_type": "txt",
-                    "page": None,
-                    "chunk_index": i + 1
-                }
-                for i in range(len(document_chunks))
-            ]
-
-            return {
-                "filename": filename,
-                "file_type": "txt",
-                "text_preview": extracted_text[:2000],
-                "text_length": len(extracted_text),
-                "chunks_created": len(document_chunks)
-            }
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"TXT processing failed: {str(e)}")
-
-    if lower_name.endswith(".docx"):
-        try:
-            doc = Document(io.BytesIO(contents))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            extracted_text = "\n".join(paragraphs)
-
-            current_filename = filename
-            current_file_type = "docx"
-            stored_text = extracted_text
-
-            document_chunks = chunk_text(extracted_text)
-            chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
-            chunk_metadata = [
-                {
-                    "filename": filename,
-                    "file_type": "docx",
-                    "page": None,
-                    "chunk_index": i + 1
-                }
-                for i in range(len(document_chunks))
-            ]
-
-            return {
-                "filename": filename,
-                "file_type": "docx",
-                "text_preview": extracted_text[:2000],
-                "text_length": len(extracted_text),
-                "chunks_created": len(document_chunks)
-            }
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"DOCX processing failed: {str(e)}")
-
-    raise HTTPException(
-        status_code=400,
-        detail="Only PDF, CSV, TXT, and DOCX files are supported."
-    )
-
-
-@app.post("/ask")
-def ask_ai(request: AskRequest):
-    global document_chunks, chunk_embeddings, chunk_metadata
-
-    if not document_chunks:
-        return {"answer": "Please upload and process a file first."}
+    text = ""
 
     try:
-        question_embedding = get_embedding(request.question)
+        # CSV
+        if filename.endswith(".csv"):
+            df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
+            text = df.to_csv(index=False)
+            file_type = "csv"
 
-        similarities = [
-            cosine_similarity(question_embedding, emb)
-            for emb in chunk_embeddings
-        ]
+        # PDF
+        elif filename.endswith(".pdf"):
+            pdf = fitz.open(stream=contents, filetype="pdf")
+            for page in pdf:
+                text += page.get_text()
+            file_type = "pdf"
 
-        top_indices = np.argsort(similarities)[-3:][::-1]
-        top_chunks = [document_chunks[i] for i in top_indices]
-        top_chunk_metadata = [chunk_metadata[i] for i in top_indices]
+        # TXT
+        elif filename.endswith(".txt"):
+            text = contents.decode("utf-8")
+            file_type = "txt"
 
-        context = "\n\n".join(top_chunks)
+        # DOCX
+        elif filename.endswith(".docx"):
+            doc = Document(io.BytesIO(contents))
+            text = "\n".join([p.text for p in doc.paragraphs])
+            file_type = "docx"
+
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+
+        document_chunks = chunk_text(text)
+        chunk_embeddings = [get_embedding(c) for c in document_chunks]
+
+        # ✅ SAVE DOCUMENT
+        result = supabase.table("documents").insert({
+            "user_id": user_id,
+            "filename": file.filename,
+            "file_type": file_type
+        }).execute()
+
+        print("📄 DOCUMENT SAVED:", result)
+
+        return {
+            "message": "Upload successful",
+            "chunks": len(document_chunks),
+            "saved_to_supabase": True
+        }
+
+    except Exception as e:
+        print("❌ UPLOAD ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- ASK ----------
+@app.post("/ask")
+def ask_ai(request: AskRequest):
+    global document_chunks, chunk_embeddings
+
+    if not document_chunks:
+        return {"answer": "Upload file first"}
+
+    try:
+        q_emb = get_embedding(request.question)
+
+        scores = [cosine_similarity(q_emb, emb) for emb in chunk_embeddings]
+        top_idx = np.argsort(scores)[-3:][::-1]
+
+        context = "\n\n".join([document_chunks[i] for i in top_idx])
 
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=f"""
-You are answering questions about an uploaded file.
+Answer using only this context:
 
-Use only the retrieved context below. If the answer is not clearly in the context, say so.
-
-Retrieved Context:
 {context}
 
 Question:
@@ -290,17 +195,26 @@ Question:
 """
         )
 
+        final_answer = response.output_text
+
+        # ✅ SAVE CHAT
+        chat = supabase.table("chat_history").insert({
+            "user_id": request.user_id,
+            "question": request.question,
+            "answer": final_answer
+        }).execute()
+
+        print("💬 CHAT SAVED:", chat)
+
         return {
-            "answer": response.output_text,
-            "retrieved_chunks_count": len(top_chunks),
-            "retrieved_chunks": [
-                {
-                    "text": chunk,
-                    "metadata": metadata
-                }
-                for chunk, metadata in zip(top_chunks, top_chunk_metadata)
-            ]
+            "answer": final_answer,
+            "saved_to_supabase": True,
+            "debug": str(chat)
         }
 
     except Exception as e:
-        return {"answer": f"Backend error: {str(e)}"}
+        print("❌ ASK ERROR:", str(e))
+        return {
+            "answer": f"Error: {str(e)}",
+            "saved_to_supabase": False
+        }
