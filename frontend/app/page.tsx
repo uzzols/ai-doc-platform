@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useUser, UserButton } from "@clerk/nextjs";
 
@@ -19,9 +19,13 @@ type DocumentItem = {
   uploaded_at?: string;
 };
 
-function Spinner() {
+function LoadingDots() {
   return (
-    <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-black" />
+    <div className="flex items-center gap-1">
+      <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+      <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+      <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
+    </div>
   );
 }
 
@@ -41,6 +45,8 @@ export default function Home() {
   const [selectedDocument, setSelectedDocument] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
   const BACKEND_URL = "https://ai-doc-platform-24cv.onrender.com";
 
   const sortedHistory = useMemo(() => {
@@ -58,6 +64,10 @@ export default function Home() {
       return bTime - aTime;
     });
   }, [documents]);
+
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   const fetchHistory = async () => {
     if (!user?.id) return;
@@ -102,6 +112,10 @@ export default function Home() {
   }, [isSignedIn, user?.id]);
 
   useEffect(() => {
+    scrollToBottom();
+  }, [sortedHistory, displayedAnswer, loading]);
+
+  useEffect(() => {
     if (!answer) {
       setDisplayedAnswer("");
       return;
@@ -116,19 +130,19 @@ export default function Home() {
       if (index >= answer.length) {
         clearInterval(interval);
       }
-    }, 10);
+    }, 8);
 
     return () => clearInterval(interval);
   }, [answer]);
 
   const handleUpload = async () => {
     if (!file) {
-      setMessage("❌ Please select a file");
+      setMessage("Please select a file.");
       return;
     }
 
     if (!user?.id) {
-      setMessage("❌ User not found. Please sign in again.");
+      setMessage("User not found. Please sign in again.");
       return;
     }
 
@@ -148,27 +162,25 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        setMessage(data.detail || data.error || "❌ Upload failed");
+        setMessage(data.detail || data.error || "Upload failed");
         return;
       }
 
-      setMessage("✅ Upload successful");
+      setMessage("Upload successful.");
       setFile(null);
       await fetchDocuments();
     } catch (error) {
-      setMessage("❌ Upload failed");
+      setMessage("Upload failed");
     } finally {
       setUploading(false);
     }
   };
 
   const handleAsk = async () => {
-    if (!question.trim()) {
-      return;
-    }
+    if (!question.trim()) return;
 
     if (!user?.id) {
-      setAnswer("❌ User not found. Please sign in again.");
+      setAnswer("User not found. Please sign in again.");
       return;
     }
 
@@ -178,6 +190,15 @@ export default function Home() {
     try {
       setLoading(true);
       setAnswer("");
+
+      const tempQuestion: ChatItem = {
+        question: currentQuestion,
+        answer: "",
+        created_at: new Date().toISOString(),
+        filename: selectedDocument || null,
+      };
+
+      setHistory((prev) => [...prev, tempQuestion]);
 
       const res = await fetch(`${BACKEND_URL}/ask`, {
         method: "POST",
@@ -194,19 +215,33 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        setAnswer(data.detail || data.error || "❌ Error getting response");
+        setAnswer(data.detail || data.error || "Error getting response");
         return;
       }
 
       const finalAnswer = data.answer || "No response";
       setAnswer(finalAnswer);
 
+      setHistory((prev) => prev.slice(0, -1));
       await fetchHistory();
     } catch (error) {
-      setAnswer("❌ Error getting response");
+      setAnswer("Error getting response");
+      setHistory((prev) => prev.slice(0, -1));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleNewChat = () => {
+    setQuestion("");
+    setAnswer("");
+    setDisplayedAnswer("");
+  };
+
+  const handleClearLocalView = () => {
+    setHistory([]);
+    setAnswer("");
+    setDisplayedAnswer("");
   };
 
   const formatDate = (value?: string) => {
@@ -219,25 +254,25 @@ export default function Home() {
   };
 
   return (
-    <main className="h-screen bg-[#f7f7f8] text-gray-900">
+    <main className="h-screen bg-[#212121] text-white">
       {!isSignedIn ? (
         <div className="flex h-screen items-center justify-center p-6">
-          <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2f2f2f] p-8 shadow-2xl">
             <h1 className="mb-2 text-2xl font-bold">AI Document Platform</h1>
-            <p className="mb-6 text-gray-600">
+            <p className="mb-6 text-gray-300">
               Sign in to upload documents and chat with your files.
             </p>
 
             <div className="flex gap-3">
               <Link
                 href="/sign-in"
-                className="flex-1 rounded-lg border bg-white px-4 py-2 text-center hover:bg-gray-100"
+                className="flex-1 rounded-lg border border-white/10 bg-[#212121] px-4 py-2 text-center hover:bg-[#2a2a2a]"
               >
                 Sign In
               </Link>
               <Link
                 href="/sign-up"
-                className="flex-1 rounded-lg bg-black px-4 py-2 text-center text-white hover:bg-gray-800"
+                className="flex-1 rounded-lg bg-white px-4 py-2 text-center text-black hover:bg-gray-200"
               >
                 Sign Up
               </Link>
@@ -247,41 +282,33 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="w-[320px] border-r bg-white p-4 flex flex-col">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Documents</h2>
+            <aside className="flex w-[300px] flex-col border-r border-white/10 bg-[#171717] p-3">
+              <div className="mb-3 flex items-center justify-between">
                 <button
-                  onClick={() => setSidebarOpen(false)}
-                  className="rounded-md px-2 py-1 text-sm hover:bg-gray-100"
+                  onClick={handleNewChat}
+                  className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-3 text-left text-sm hover:bg-[#2a2a2a]"
                 >
-                  ✕
+                  + New chat
                 </button>
               </div>
 
-              <div className="mb-4 rounded-xl border bg-gray-50 p-4">
-                <p className="mb-2 text-sm font-medium">Upload file</p>
+              <div className="mb-4 rounded-xl border border-white/10 bg-[#212121] p-4">
+                <p className="mb-2 text-sm font-medium text-gray-200">Upload file</p>
 
                 <input
                   type="file"
                   accept=".pdf,.csv,.txt,.docx"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="mb-3 w-full text-sm"
+                  className="mb-3 w-full text-sm text-gray-300"
                 />
 
                 <div className="flex gap-2">
                   <button
                     onClick={handleUpload}
                     disabled={uploading}
-                    className="flex items-center gap-2 rounded-lg bg-black px-3 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-70"
+                    className="rounded-lg bg-white px-3 py-2 text-sm text-black hover:bg-gray-200 disabled:opacity-70"
                   >
-                    {uploading ? (
-                      <>
-                        <Spinner />
-                        Uploading
-                      </>
-                    ) : (
-                      "Upload"
-                    )}
+                    {uploading ? "Uploading..." : "Upload"}
                   </button>
 
                   <button
@@ -289,25 +316,25 @@ export default function Home() {
                       setFile(null);
                       setMessage("");
                     }}
-                    className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-100"
+                    className="rounded-lg border border-white/10 bg-[#171717] px-3 py-2 text-sm hover:bg-[#2a2a2a]"
                   >
                     Clear
                   </button>
                 </div>
 
                 {message && (
-                  <p className="mt-3 text-xs text-gray-600">{message}</p>
+                  <p className="mt-3 text-xs text-gray-400">{message}</p>
                 )}
               </div>
 
               <div className="mb-4">
-                <label className="mb-2 block text-sm font-medium">
+                <label className="mb-2 block text-sm font-medium text-gray-200">
                   Selected document
                 </label>
                 <select
                   value={selectedDocument}
                   onChange={(e) => setSelectedDocument(e.target.value)}
-                  className="w-full rounded-lg border bg-white p-3 text-sm"
+                  className="w-full rounded-lg border border-white/10 bg-[#212121] p-3 text-sm text-white"
                 >
                   {sortedDocuments.length === 0 ? (
                     <option value="">No documents uploaded</option>
@@ -324,54 +351,50 @@ export default function Home() {
                 </select>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <p className="mb-2 text-sm font-medium text-gray-700">
-                  Uploaded files
-                </p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-200">Uploaded files</p>
+                <button
+                  onClick={handleClearLocalView}
+                  className="text-xs text-gray-400 hover:text-white"
+                >
+                  Clear view
+                </button>
+              </div>
 
-                <div className="space-y-2">
-                  {sortedDocuments.length === 0 ? (
-                    <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-500">
-                      No documents yet
-                    </div>
-                  ) : (
-                    sortedDocuments.map((doc, index) => (
-                      <button
-                        key={doc.id || `${doc.filename}-${index}`}
-                        onClick={() => setSelectedDocument(doc.filename)}
-                        className={`w-full rounded-xl border p-3 text-left transition ${
-                          selectedDocument === doc.filename
-                            ? "border-black bg-black text-white"
-                            : "bg-white hover:bg-gray-50"
-                        }`}
-                      >
-                        <p className="truncate text-sm font-medium">
-                          {doc.filename}
-                        </p>
-                        <p
-                          className={`mt-1 text-xs ${
-                            selectedDocument === doc.filename
-                              ? "text-gray-300"
-                              : "text-gray-500"
-                          }`}
-                        >
-                          {doc.file_type?.toUpperCase() || "FILE"}
-                        </p>
-                      </button>
-                    ))
-                  )}
-                </div>
+              <div className="min-h-0 flex-1 overflow-y-auto space-y-2 pr-1">
+                {sortedDocuments.length === 0 ? (
+                  <div className="rounded-lg border border-white/10 bg-[#212121] p-3 text-sm text-gray-400">
+                    No documents yet
+                  </div>
+                ) : (
+                  sortedDocuments.map((doc, index) => (
+                    <button
+                      key={doc.id || `${doc.filename}-${index}`}
+                      onClick={() => setSelectedDocument(doc.filename)}
+                      className={`w-full rounded-xl border p-3 text-left transition ${
+                        selectedDocument === doc.filename
+                          ? "border-white/20 bg-[#2f2f2f] text-white"
+                          : "border-white/10 bg-[#212121] hover:bg-[#2a2a2a]"
+                      }`}
+                    >
+                      <p className="truncate text-sm font-medium">{doc.filename}</p>
+                      <p className="mt-1 text-xs text-gray-400">
+                        {doc.file_type?.toUpperCase() || "FILE"}
+                      </p>
+                    </button>
+                  ))
+                )}
               </div>
             </aside>
           )}
 
           <section className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center justify-between border-b bg-white px-4 py-3">
+            <header className="flex items-center justify-between border-b border-white/10 bg-[#212121] px-4 py-3">
               <div className="flex items-center gap-3">
                 {!sidebarOpen && (
                   <button
                     onClick={() => setSidebarOpen(true)}
-                    className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-100"
+                    className="rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-[#2a2a2a]"
                   >
                     ☰
                   </button>
@@ -379,7 +402,7 @@ export default function Home() {
 
                 <div>
                   <h1 className="text-lg font-semibold">AI Document Platform</h1>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-400">
                     {selectedDocument
                       ? `Current file: ${selectedDocument}`
                       : "No file selected"}
@@ -387,18 +410,26 @@ export default function Home() {
                 </div>
               </div>
 
-              <UserButton />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSidebarOpen((prev) => !prev)}
+                  className="rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-[#2a2a2a]"
+                >
+                  {sidebarOpen ? "Hide panel" : "Show panel"}
+                </button>
+                <UserButton />
+              </div>
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
                 {sortedHistory.length === 0 && !loading && !displayedAnswer && (
-                  <div className="mt-16 text-center">
-                    <h2 className="mb-2 text-3xl font-semibold">
+                  <div className="mt-20 text-center">
+                    <h2 className="mb-3 text-4xl font-semibold">
                       Ask your document anything
                     </h2>
-                    <p className="text-gray-500">
-                      Upload a file, select it from the sidebar, and start chatting.
+                    <p className="text-gray-400">
+                      Upload a file, select it, and start chatting.
                     </p>
                   </div>
                 )}
@@ -406,17 +437,17 @@ export default function Home() {
                 {sortedHistory.map((item, index) => (
                   <div key={item.id || `${item.question}-${index}`} className="space-y-4">
                     <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-2xl bg-black px-4 py-3 text-white shadow-sm">
-                        <p className="whitespace-pre-wrap text-sm">{item.question}</p>
+                      <div className="max-w-[80%] rounded-3xl bg-[#303030] px-5 py-4 text-white">
+                        <p className="whitespace-pre-wrap text-sm leading-6">{item.question}</p>
                       </div>
                     </div>
 
                     <div className="flex justify-start">
-                      <div className="max-w-[85%] rounded-2xl bg-white px-4 py-3 shadow-sm border">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                      <div className="max-w-[90%] rounded-3xl bg-[#212121] px-5 py-4">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
                           AI
                         </p>
-                        <p className="whitespace-pre-wrap text-sm text-gray-800">
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-gray-100">
                           {item.answer}
                         </p>
 
@@ -432,19 +463,19 @@ export default function Home() {
                 {loading && (
                   <div className="space-y-4">
                     <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-2xl bg-black px-4 py-3 text-white shadow-sm">
-                        <p className="whitespace-pre-wrap text-sm">Thinking...</p>
+                      <div className="max-w-[80%] rounded-3xl bg-[#303030] px-5 py-4 text-white">
+                        <p className="whitespace-pre-wrap text-sm leading-6">Thinking...</p>
                       </div>
                     </div>
 
                     <div className="flex justify-start">
-                      <div className="max-w-[85%] rounded-2xl border bg-white px-4 py-3 shadow-sm">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                      <div className="max-w-[90%] rounded-3xl bg-[#212121] px-5 py-4">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
                           AI
                         </p>
-                        <div className="flex items-center gap-2 text-sm text-gray-700">
-                          <Spinner />
-                          AI is thinking...
+                        <div className="flex items-center gap-3 text-sm text-gray-300">
+                          <LoadingDots />
+                          Thinking...
                         </div>
                       </div>
                     </div>
@@ -453,22 +484,24 @@ export default function Home() {
 
                 {!loading && displayedAnswer && (
                   <div className="flex justify-start">
-                    <div className="max-w-[85%] rounded-2xl border bg-white px-4 py-3 shadow-sm">
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    <div className="max-w-[90%] rounded-3xl bg-[#212121] px-5 py-4">
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
                         AI
                       </p>
-                      <p className="whitespace-pre-wrap text-sm text-gray-800">
+                      <p className="whitespace-pre-wrap text-sm leading-6 text-gray-100">
                         {displayedAnswer}
                       </p>
                     </div>
                   </div>
                 )}
+
+                <div ref={chatEndRef} />
               </div>
             </div>
 
-            <div className="border-t bg-white px-4 py-4">
+            <div className="border-t border-white/10 bg-[#212121] px-4 py-4">
               <div className="mx-auto w-full max-w-4xl">
-                <div className="rounded-2xl border bg-white p-3 shadow-sm">
+                <div className="rounded-3xl border border-white/10 bg-[#2f2f2f] p-3 shadow-sm">
                   <textarea
                     placeholder="Message your document..."
                     value={question}
@@ -482,18 +515,18 @@ export default function Home() {
                       }
                     }}
                     rows={3}
-                    className="w-full resize-none border-0 p-2 text-sm outline-none"
+                    className="w-full resize-none bg-transparent p-2 text-sm text-white outline-none placeholder:text-gray-400"
                   />
 
                   <div className="mt-2 flex items-center justify-between">
-                    <p className="text-xs text-gray-500">
-                      Press Enter to send, Shift + Enter for new line
+                    <p className="text-xs text-gray-400">
+                      Enter to send, Shift + Enter for new line
                     </p>
 
                     <button
                       onClick={handleAsk}
                       disabled={loading || !question.trim()}
-                      className="rounded-xl bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-2xl bg-white px-4 py-2 text-sm font-medium text-black hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {loading ? "Thinking..." : "Send"}
                     </button>
