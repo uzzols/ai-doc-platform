@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useUser, UserButton } from "@clerk/nextjs";
 
 export default function Home() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn, user } = useUser();
 
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
@@ -13,18 +13,22 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // 🔹 Backend URL (IMPORTANT)
   const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL;
 
-  // 🔹 Upload File
   const handleUpload = async () => {
     if (!file) {
       setMessage("❌ Please select a file");
       return;
     }
 
+    if (!user?.id) {
+      setMessage("❌ User not found. Please sign in again.");
+      return;
+    }
+
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("user_id", user.id);
 
     try {
       setLoading(true);
@@ -36,6 +40,12 @@ export default function Home() {
       });
 
       const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data.detail || data.error || "❌ Upload failed");
+        return;
+      }
+
       setMessage("✅ Upload successful");
     } catch (err) {
       setMessage("❌ Upload failed");
@@ -44,9 +54,16 @@ export default function Home() {
     }
   };
 
-  // 🔹 Ask AI
   const handleAsk = async () => {
-    if (!question) return;
+    if (!question) {
+      setAnswer("❌ Please enter a question");
+      return;
+    }
+
+    if (!user?.id) {
+      setAnswer("❌ User not found. Please sign in again.");
+      return;
+    }
 
     try {
       setLoading(true);
@@ -57,7 +74,10 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({
+          question,
+          user_id: user.id,
+        }),
       });
 
       const data = await res.json();
@@ -71,8 +91,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
-
-      {/* 🔹 HEADER */}
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold">AI Document Platform</h1>
@@ -104,7 +122,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 🔹 BACKEND STATUS */}
       <div className="bg-white p-4 rounded-xl shadow mb-6">
         <p className="text-gray-700">
           Backend status: <span className="text-green-600">Connected ✅</span>
@@ -114,7 +131,6 @@ export default function Home() {
         </p>
       </div>
 
-      {/* 🔐 LOCKED UI */}
       {!isSignedIn ? (
         <div className="bg-white p-6 rounded-xl shadow text-center">
           <h2 className="text-xl font-semibold mb-2">
@@ -142,7 +158,6 @@ export default function Home() {
         </div>
       ) : (
         <>
-          {/* 📤 UPLOAD */}
           <div className="bg-white p-6 rounded-xl shadow mb-6">
             <h2 className="text-lg font-semibold mb-3">1. Upload File</h2>
 
@@ -178,7 +193,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* 🤖 ASK AI */}
           <div className="bg-white p-6 rounded-xl shadow">
             <h2 className="text-lg font-semibold mb-3">2. Ask AI</h2>
 
@@ -200,7 +214,7 @@ export default function Home() {
             {answer && (
               <div className="mt-4 p-4 bg-gray-100 rounded-lg">
                 <strong>Answer:</strong>
-                <p className="mt-2">{answer}</p>
+                <p className="mt-2 whitespace-pre-wrap">{answer}</p>
               </div>
             )}
           </div>
