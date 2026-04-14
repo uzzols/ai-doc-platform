@@ -10,6 +10,7 @@ import io
 import fitz
 import os
 import numpy as np
+from typing import Optional
 
 load_dotenv()
 
@@ -36,13 +37,14 @@ if not supabase_url or not supabase_key:
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
-document_chunks = []
-chunk_embeddings = []
+# Store document chunks in memory by filename
+document_store = {}
 
 
 class AskRequest(BaseModel):
     question: str
     user_id: str
+    filename: Optional[str] = None
 
 
 @app.get("/")
@@ -77,6 +79,38 @@ def debug_supabase():
         }
 
 
+@app.get("/history/{user_id}")
+def get_chat_history(user_id: str):
+    try:
+        result = (
+            supabase.table("chat_history")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return result.data
+    except Exception as e:
+        print("HISTORY ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documents/{user_id}")
+def get_documents(user_id: str):
+    try:
+        result = (
+            supabase.table("documents")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("uploaded_at", desc=True)
+            .execute()
+        )
+        return result.data
+    except Exception as e:
+        print("DOCUMENTS ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def chunk_text(text, size=1000):
     return [text[i:i + size] for i in range(0, len(text), size) if text[i:i + size].strip()]
 
@@ -92,7 +126,10 @@ def get_embedding(text):
 def cosine_similarity(a, b):
     a = np.array(a)
     b = np.array(b)
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    denom = np.linalg.norm(a) * np.linalg.norm(b)
+    if denom == 0:
+        return 0
+    return np.dot(a, b) / denom
 
 
 @app.post("/upload")
@@ -100,17 +137,16 @@ async def upload_file(
     file: UploadFile = File(...),
     user_id: str = Form(...)
 ):
-    global document_chunks, chunk_embeddings
-
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file")
 
     contents = await file.read()
-    filename = file.filename.lower()
+    filename_lower = file.filename.lower()
     text = ""
+    file_type = ""
 
     try:
-        if filename.endswith(".csv"):
+        if filename_lower.endswith(".csv"):
             try:
                 df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
             except Exception:
@@ -118,20 +154,21 @@ async def upload_file(
             text = df.to_csv(index=False)
             file_type = "csv"
 
-        elif filename.endswith(".pdf"):
+        elif filename_lower.endswith(".pdf"):
             pdf = fitz.open(stream=contents, filetype="pdf")
             for page in pdf:
                 text += page.get_text()
+            pdf.close()
             file_type = "pdf"
 
-        elif filename.endswith(".txt"):
+        elif filename_lower.endswith(".txt"):
             try:
                 text = contents.decode("utf-8")
             except Exception:
                 text = contents.decode("latin-1")
             file_type = "txt"
 
-        elif filename.endswith(".docx"):
+        elif filename_lower.endswith(".docx"):
             doc = Document(io.BytesIO(contents))
             text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
             file_type = "docx"
@@ -139,8 +176,18 @@ async def upload_file(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from file")
+
         document_chunks = chunk_text(text)
-        chunk_embeddings = [get_embedding(c) for c in document_chunks]
+        chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
+
+        # Save in memory for current backend session
+        document_store[file.filename] = {
+            "user_id": user_id,
+            "chunks": document_chunks,
+            "embeddings": chunk_embeddings
+        }
 
         result = supabase.table("documents").insert({
             "user_id": user_id,
@@ -152,10 +199,13 @@ async def upload_file(
 
         return {
             "message": "Upload successful",
+            "filename": file.filename,
             "chunks": len(document_chunks),
             "saved_to_supabase": True
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         print("UPLOAD ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -163,12 +213,47 @@ async def upload_file(
 
 @app.post("/ask")
 def ask_ai(request: AskRequest):
-    global document_chunks, chunk_embeddings
-
-    if not document_chunks:
-        return {"answer": "Upload file first"}
-
     try:
+        selected_filename = request.filename
+        document_chunks = []
+        chunk_embeddings = []
+
+        # If a specific document is selected, use it
+        if selected_filename:
+            doc_data = document_store.get(selected_filename)
+
+            if not doc_data:
+                return {
+                    "answer": f"The selected document '{selected_filename}' is not loaded in memory yet. Please upload it again before asking.",
+                    "saved_to_supabase": False
+                }
+
+            if doc_data["user_id"] != request.user_id:
+                return {
+                    "answer": "You do not have access to this document.",
+                    "saved_to_supabase": False
+                }
+
+            document_chunks = doc_data["chunks"]
+            chunk_embeddings = doc_data["embeddings"]
+
+        else:
+            # fallback: use the most recently uploaded in-memory document for this user
+            user_docs = [
+                doc for doc in document_store.values()
+                if doc["user_id"] == request.user_id
+            ]
+
+            if not user_docs:
+                return {"answer": "Upload file first"}
+
+            latest_doc = user_docs[-1]
+            document_chunks = latest_doc["chunks"]
+            chunk_embeddings = latest_doc["embeddings"]
+
+        if not document_chunks:
+            return {"answer": "Upload file first"}
+
         q_emb = get_embedding(request.question)
 
         scores = [cosine_similarity(q_emb, emb) for emb in chunk_embeddings]
@@ -192,7 +277,8 @@ Question:
         chat = supabase.table("chat_history").insert({
             "user_id": request.user_id,
             "question": request.question,
-            "answer": final_answer
+            "answer": final_answer,
+            "filename": selected_filename
         }).execute()
 
         print("CHAT SAVED:", chat)
