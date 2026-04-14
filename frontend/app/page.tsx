@@ -13,7 +13,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL;
+  const BACKEND_URL = "https://ai-doc-platform-24cv.onrender.com";
 
   const handleUpload = async () => {
     if (!file) {
@@ -81,6 +81,12 @@ export default function Home() {
       });
 
       const data = await res.json();
+
+      if (!res.ok) {
+        setAnswer(data.detail || data.error || "❌ Error getting response");
+        return;
+      }
+
       setAnswer(data.answer || "No response");
     } catch (err) {
       setAnswer("❌ Error getting response");
@@ -137,7 +143,8 @@ export default function Home() {
             Sign in to use the app 🔐
           </h2>
           <p className="text-gray-600 mb-4">
-            Please sign in or create an account to upload files and ask AI questions.
+            Please sign in or create an account to upload files and ask AI
+            questions.
           </p>
 
           <div className="flex justify-center gap-4">
@@ -188,9 +195,7 @@ export default function Home() {
               </button>
             </div>
 
-            {message && (
-              <p className="mt-3 text-sm text-gray-700">{message}</p>
-            )}
+            {message && <p className="mt-3 text-sm text-gray-700">{message}</p>}
           </div>
 
           <div className="bg-white p-6 rounded-xl shadow">
