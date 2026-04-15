@@ -11,6 +11,7 @@ import fitz
 import os
 import numpy as np
 from typing import Optional
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -69,28 +70,6 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/debug-supabase")
-def debug_supabase():
-    try:
-        test = supabase.table("chat_history").insert({
-            "user_id": "debug-user",
-            "question": "test question",
-            "answer": "test answer"
-        }).execute()
-
-        return {
-            "success": True,
-            "result": str(test),
-            "supabase_url": supabase_url
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "supabase_url": supabase_url
-        }
-
-
 @app.get("/documents/{user_id}")
 def get_documents(user_id: str):
     try:
@@ -108,15 +87,18 @@ def get_documents(user_id: str):
 
 
 @app.get("/conversations/{user_id}")
-def get_conversations(user_id: str):
+def get_conversations(user_id: str, filename: Optional[str] = None):
     try:
-        result = (
+        query = (
             supabase.table("conversations")
             .select("*")
             .eq("user_id", user_id)
-            .order("updated_at", desc=True)
-            .execute()
         )
+
+        if filename:
+            query = query.eq("filename", filename)
+
+        result = query.order("updated_at", desc=True).execute()
         return result.data
     except Exception as e:
         print("CONVERSATIONS ERROR:", str(e))
@@ -126,10 +108,14 @@ def get_conversations(user_id: str):
 @app.post("/conversations")
 def create_conversation(request: CreateConversationRequest):
     try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         result = supabase.table("conversations").insert({
             "user_id": request.user_id,
             "title": request.title or "New Chat",
-            "filename": request.filename
+            "filename": request.filename,
+            "created_at": now_iso,
+            "updated_at": now_iso,
         }).execute()
 
         if not result.data:
@@ -144,15 +130,15 @@ def create_conversation(request: CreateConversationRequest):
 @app.patch("/conversations/{conversation_id}")
 def update_conversation(conversation_id: str, request: UpdateConversationRequest):
     try:
-        update_data = {}
+        update_data = {
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
 
         if request.title is not None:
             update_data["title"] = request.title
 
         if request.filename is not None:
             update_data["filename"] = request.filename
-
-        update_data["updated_at"] = "now()"
 
         result = (
             supabase.table("conversations")
@@ -170,12 +156,8 @@ def update_conversation(conversation_id: str, request: UpdateConversationRequest
 @app.delete("/conversations/{conversation_id}")
 def delete_conversation(conversation_id: str):
     try:
-        # Delete messages first
         supabase.table("chat_history").delete().eq("conversation_id", conversation_id).execute()
-
-        # Delete conversation
         supabase.table("conversations").delete().eq("id", conversation_id).execute()
-
         return {"message": "Conversation deleted"}
     except Exception as e:
         print("DELETE CONVERSATION ERROR:", str(e))
@@ -215,8 +197,8 @@ def cosine_similarity(a, b):
     b = np.array(b)
     denom = np.linalg.norm(a) * np.linalg.norm(b)
     if denom == 0:
-        return 0
-    return np.dot(a, b) / denom
+        return 0.0
+    return float(np.dot(a, b) / denom)
 
 
 @app.post("/upload")
@@ -306,7 +288,6 @@ def ask_ai(request: AskRequest):
                 "saved_to_supabase": False
             }
 
-        # Get conversation info
         convo_result = (
             supabase.table("conversations")
             .select("*")
@@ -344,13 +325,10 @@ def ask_ai(request: AskRequest):
                 "saved_to_supabase": False
             }
 
-        document_chunks = doc_data["chunks"]
-        chunk_embeddings = doc_data["embeddings"]
-
         q_emb = get_embedding(request.question)
-        scores = [cosine_similarity(q_emb, emb) for emb in chunk_embeddings]
+        scores = [cosine_similarity(q_emb, emb) for emb in doc_data["embeddings"]]
         top_idx = np.argsort(scores)[-3:][::-1]
-        context = "\n\n".join([document_chunks[i] for i in top_idx])
+        context = "\n\n".join([doc_data["chunks"][i] for i in top_idx])
 
         response = client.responses.create(
             model="gpt-4.1-mini",
@@ -365,16 +343,17 @@ Question:
         )
 
         final_answer = response.output_text
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         chat = supabase.table("chat_history").insert({
             "user_id": request.user_id,
             "conversation_id": request.conversation_id,
             "question": request.question,
             "answer": final_answer,
-            "filename": selected_filename
+            "filename": selected_filename,
+            "created_at": now_iso
         }).execute()
 
-        # Update conversation timestamp
         current_title = conversation.get("title") or "New Chat"
         new_title = current_title
 
@@ -385,7 +364,7 @@ Question:
         supabase.table("conversations").update({
             "title": new_title,
             "filename": selected_filename,
-            "updated_at": "now()"
+            "updated_at": now_iso
         }).eq("id", request.conversation_id).execute()
 
         print("CHAT SAVED:", chat)
