@@ -37,7 +37,7 @@ if not supabase_url or not supabase_key:
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
-# Store document chunks in memory by filename
+# In-memory store for uploaded document chunks
 document_store = {}
 
 
@@ -80,16 +80,20 @@ def debug_supabase():
 
 
 @app.get("/history/{user_id}")
-def get_chat_history(user_id: str):
+def get_chat_history(user_id: str, filename: Optional[str] = None):
     try:
-        result = (
+        query = (
             supabase.table("chat_history")
             .select("*")
             .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+
+        if filename:
+            query = query.eq("filename", filename)
+
+        result = query.order("created_at", desc=False).execute()
         return result.data
+
     except Exception as e:
         print("HISTORY ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -182,7 +186,6 @@ async def upload_file(
         document_chunks = chunk_text(text)
         chunk_embeddings = [get_embedding(chunk) for chunk in document_chunks]
 
-        # Save in memory for current backend session
         document_store[file.filename] = {
             "user_id": user_id,
             "chunks": document_chunks,
@@ -218,7 +221,6 @@ def ask_ai(request: AskRequest):
         document_chunks = []
         chunk_embeddings = []
 
-        # If a specific document is selected, use it
         if selected_filename:
             doc_data = document_store.get(selected_filename)
 
@@ -238,7 +240,6 @@ def ask_ai(request: AskRequest):
             chunk_embeddings = doc_data["embeddings"]
 
         else:
-            # fallback: use the most recently uploaded in-memory document for this user
             user_docs = [
                 doc for doc in document_store.values()
                 if doc["user_id"] == request.user_id
