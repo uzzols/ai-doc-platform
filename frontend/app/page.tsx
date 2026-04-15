@@ -282,7 +282,7 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="flex w-[300px] flex-col border-r border-gray-200 bg-white p-3">
+            <aside className="flex w-[240px] flex-col border-r border-gray-200 bg-white p-3">
               <div className="mb-3 flex items-center justify-between">
                 <button
                   onClick={handleNewChat}
@@ -292,21 +292,21 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <p className="mb-2 text-sm font-medium text-gray-800">Upload file</p>
 
                 <input
                   type="file"
                   accept=".pdf,.csv,.txt,.docx"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="mb-3 w-full text-sm text-gray-700"
+                  className="mb-3 w-full text-xs text-gray-700"
                 />
 
                 <div className="flex gap-2">
                   <button
                     onClick={handleUpload}
                     disabled={uploading}
-                    className="rounded-lg bg-black px-3 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-70"
+                    className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800 disabled:opacity-70"
                   >
                     {uploading ? "Uploading..." : "Upload"}
                   </button>
@@ -316,7 +316,7 @@ export default function Home() {
                       setFile(null);
                       setMessage("");
                     }}
-                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm hover:bg-gray-100"
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100"
                   >
                     Clear
                   </button>
@@ -334,7 +334,7 @@ export default function Home() {
                 <select
                   value={selectedDocument}
                   onChange={(e) => setSelectedDocument(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-900"
+                  className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-xs text-gray-900"
                 >
                   {sortedDocuments.length === 0 ? (
                     <option value="">No documents uploaded</option>
@@ -352,12 +352,12 @@ export default function Home() {
               </div>
 
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-800">Uploaded files</p>
+                <p className="text-sm font-medium text-gray-800">Files</p>
                 <button
                   onClick={handleClearLocalView}
                   className="text-xs text-gray-500 hover:text-black"
                 >
-                  Clear view
+                  Clear
                 </button>
               </div>
 
@@ -377,9 +377,9 @@ export default function Home() {
                           : "border-gray-200 bg-white hover:bg-gray-50"
                       }`}
                     >
-                      <p className="truncate text-sm font-medium">{doc.filename}</p>
+                      <p className="truncate text-xs font-medium">{doc.filename}</p>
                       <p
-                        className={`mt-1 text-xs ${
+                        className={`mt-1 text-[11px] ${
                           selectedDocument === doc.filename
                             ? "text-gray-300"
                             : "text-gray-500"
@@ -428,7 +428,7 @@ export default function Home() {
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
+              <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">
                 {sortedHistory.length === 0 && !loading && !displayedAnswer && (
                   <div className="mt-20 text-center">
                     <h2 className="mb-3 text-4xl font-semibold text-gray-900">
@@ -443,13 +443,13 @@ export default function Home() {
                 {sortedHistory.map((item, index) => (
                   <div key={item.id || `${item.question}-${index}`} className="space-y-4">
                     <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-3xl bg-black px-5 py-4 text-white">
+                      <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
                         <p className="whitespace-pre-wrap text-sm leading-6">{item.question}</p>
                       </div>
                     </div>
 
                     <div className="flex justify-start">
-                      <div className="max-w-[90%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
                         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
                           AI
                         </p>
@@ -469,13 +469,13 @@ export default function Home() {
                 {loading && (
                   <div className="space-y-4">
                     <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-3xl bg-black px-5 py-4 text-white">
+                      <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
                         <p className="whitespace-pre-wrap text-sm leading-6">Thinking...</p>
                       </div>
                     </div>
 
                     <div className="flex justify-start">
-                      <div className="max-w-[90%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
                         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
                           AI
                         </p>
@@ -490,7 +490,7 @@ export default function Home() {
 
                 {!loading && displayedAnswer && (
                   <div className="flex justify-start">
-                    <div className="max-w-[90%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                    <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
                         AI
                       </p>
@@ -506,7 +506,7 @@ export default function Home() {
             </div>
 
             <div className="border-t border-gray-200 bg-white px-4 py-4">
-              <div className="mx-auto w-full max-w-4xl">
+              <div className="mx-auto w-full max-w-6xl">
                 <div className="rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
                   <textarea
                     placeholder="Message your document..."
