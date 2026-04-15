@@ -37,13 +37,25 @@ if not supabase_url or not supabase_key:
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
-# In-memory store for uploaded document chunks
+# In-memory document store
 document_store = {}
 
 
 class AskRequest(BaseModel):
     question: str
     user_id: str
+    conversation_id: Optional[str] = None
+    filename: Optional[str] = None
+
+
+class CreateConversationRequest(BaseModel):
+    user_id: str
+    title: Optional[str] = "New Chat"
+    filename: Optional[str] = None
+
+
+class UpdateConversationRequest(BaseModel):
+    title: Optional[str] = None
     filename: Optional[str] = None
 
 
@@ -79,26 +91,6 @@ def debug_supabase():
         }
 
 
-@app.get("/history/{user_id}")
-def get_chat_history(user_id: str, filename: Optional[str] = None):
-    try:
-        query = (
-            supabase.table("chat_history")
-            .select("*")
-            .eq("user_id", user_id)
-        )
-
-        if filename:
-            query = query.eq("filename", filename)
-
-        result = query.order("created_at", desc=False).execute()
-        return result.data
-
-    except Exception as e:
-        print("HISTORY ERROR:", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/documents/{user_id}")
 def get_documents(user_id: str):
     try:
@@ -112,6 +104,97 @@ def get_documents(user_id: str):
         return result.data
     except Exception as e:
         print("DOCUMENTS ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/conversations/{user_id}")
+def get_conversations(user_id: str):
+    try:
+        result = (
+            supabase.table("conversations")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        return result.data
+    except Exception as e:
+        print("CONVERSATIONS ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/conversations")
+def create_conversation(request: CreateConversationRequest):
+    try:
+        result = supabase.table("conversations").insert({
+            "user_id": request.user_id,
+            "title": request.title or "New Chat",
+            "filename": request.filename
+        }).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create conversation")
+
+        return result.data[0]
+    except Exception as e:
+        print("CREATE CONVERSATION ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/conversations/{conversation_id}")
+def update_conversation(conversation_id: str, request: UpdateConversationRequest):
+    try:
+        update_data = {}
+
+        if request.title is not None:
+            update_data["title"] = request.title
+
+        if request.filename is not None:
+            update_data["filename"] = request.filename
+
+        update_data["updated_at"] = "now()"
+
+        result = (
+            supabase.table("conversations")
+            .update(update_data)
+            .eq("id", conversation_id)
+            .execute()
+        )
+
+        return result.data[0] if result.data else {}
+    except Exception as e:
+        print("UPDATE CONVERSATION ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str):
+    try:
+        # Delete messages first
+        supabase.table("chat_history").delete().eq("conversation_id", conversation_id).execute()
+
+        # Delete conversation
+        supabase.table("conversations").delete().eq("id", conversation_id).execute()
+
+        return {"message": "Conversation deleted"}
+    except Exception as e:
+        print("DELETE CONVERSATION ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/history/{conversation_id}")
+def get_chat_history(conversation_id: str):
+    try:
+        result = (
+            supabase.table("chat_history")
+            .select("*")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        return result.data
+    except Exception as e:
+        print("HISTORY ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -217,46 +300,54 @@ async def upload_file(
 @app.post("/ask")
 def ask_ai(request: AskRequest):
     try:
-        selected_filename = request.filename
-        document_chunks = []
-        chunk_embeddings = []
+        if not request.conversation_id:
+            return {
+                "answer": "No active conversation selected.",
+                "saved_to_supabase": False
+            }
 
-        if selected_filename:
-            doc_data = document_store.get(selected_filename)
+        # Get conversation info
+        convo_result = (
+            supabase.table("conversations")
+            .select("*")
+            .eq("id", request.conversation_id)
+            .eq("user_id", request.user_id)
+            .execute()
+        )
 
-            if not doc_data:
-                return {
-                    "answer": f"The selected document '{selected_filename}' is not loaded in memory yet. Please upload it again before asking.",
-                    "saved_to_supabase": False
-                }
+        if not convo_result.data:
+            return {
+                "answer": "Conversation not found.",
+                "saved_to_supabase": False
+            }
 
-            if doc_data["user_id"] != request.user_id:
-                return {
-                    "answer": "You do not have access to this document.",
-                    "saved_to_supabase": False
-                }
+        conversation = convo_result.data[0]
+        selected_filename = request.filename or conversation.get("filename")
 
-            document_chunks = doc_data["chunks"]
-            chunk_embeddings = doc_data["embeddings"]
+        if not selected_filename:
+            return {
+                "answer": "No document selected for this conversation.",
+                "saved_to_supabase": False
+            }
 
-        else:
-            user_docs = [
-                doc for doc in document_store.values()
-                if doc["user_id"] == request.user_id
-            ]
+        doc_data = document_store.get(selected_filename)
 
-            if not user_docs:
-                return {"answer": "Upload file first"}
+        if not doc_data:
+            return {
+                "answer": f"The selected document '{selected_filename}' is not loaded in memory yet. Please upload it again before asking.",
+                "saved_to_supabase": False
+            }
 
-            latest_doc = user_docs[-1]
-            document_chunks = latest_doc["chunks"]
-            chunk_embeddings = latest_doc["embeddings"]
+        if doc_data["user_id"] != request.user_id:
+            return {
+                "answer": "You do not have access to this document.",
+                "saved_to_supabase": False
+            }
 
-        if not document_chunks:
-            return {"answer": "Upload file first"}
+        document_chunks = doc_data["chunks"]
+        chunk_embeddings = doc_data["embeddings"]
 
         q_emb = get_embedding(request.question)
-
         scores = [cosine_similarity(q_emb, emb) for emb in chunk_embeddings]
         top_idx = np.argsort(scores)[-3:][::-1]
         context = "\n\n".join([document_chunks[i] for i in top_idx])
@@ -277,17 +368,33 @@ Question:
 
         chat = supabase.table("chat_history").insert({
             "user_id": request.user_id,
+            "conversation_id": request.conversation_id,
             "question": request.question,
             "answer": final_answer,
             "filename": selected_filename
         }).execute()
+
+        # Update conversation timestamp
+        current_title = conversation.get("title") or "New Chat"
+        new_title = current_title
+
+        if current_title == "New Chat":
+            shortened = request.question.strip()
+            new_title = shortened[:40] + ("..." if len(shortened) > 40 else "")
+
+        supabase.table("conversations").update({
+            "title": new_title,
+            "filename": selected_filename,
+            "updated_at": "now()"
+        }).eq("id", request.conversation_id).execute()
 
         print("CHAT SAVED:", chat)
 
         return {
             "answer": final_answer,
             "saved_to_supabase": True,
-            "debug": str(chat)
+            "conversation_id": request.conversation_id,
+            "title": new_title
         }
 
     except Exception as e:
