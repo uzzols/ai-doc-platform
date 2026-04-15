@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { useUser, UserButton } from "@clerk/nextjs";
 
 type ChatItem = {
@@ -42,8 +41,6 @@ function LoadingDots() {
 
 export default function Home() {
   const { isSignedIn, user } = useUser();
-  const searchParams = useSearchParams();
-  const shareToken = searchParams.get("share");
 
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
@@ -205,6 +202,11 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const shareToken = params.get("share");
+
     if (shareToken) {
       fetchSharedConversation(shareToken);
       return;
@@ -214,7 +216,7 @@ export default function Home() {
       fetchDocuments();
       fetchConversations();
     }
-  }, [isSignedIn, user?.id, shareToken]);
+  }, [isSignedIn, user?.id]);
 
   useEffect(() => {
     scrollToBottom();
@@ -335,10 +337,12 @@ export default function Home() {
   const handleAsk = async () => {
     if (!question.trim() || loading) return;
     if (!user?.id) return;
+
     if (!activeConversationId) {
       setAnswer("Please start or select a conversation first.");
       return;
     }
+
     if (!selectedDocument) {
       setAnswer("Please select a document first.");
       return;
@@ -500,8 +504,13 @@ export default function Home() {
       if (res.ok && data?.share_path) {
         const fullUrl = `${FRONTEND_URL}/${data.share_path}`;
         setShareLink(fullUrl);
-        await navigator.clipboard.writeText(fullUrl);
-        alert("Share link copied to clipboard");
+
+        try {
+          await navigator.clipboard.writeText(fullUrl);
+          alert("Share link copied to clipboard");
+        } catch {
+          alert(`Share link: ${fullUrl}`);
+        }
       }
     } catch (error) {
       console.error("Failed to share conversation:", error);
@@ -558,19 +567,15 @@ export default function Home() {
     }
   };
 
-  if (shareToken && sharedView) {
+  if (sharedView) {
     return (
       <main className="min-h-screen bg-[#f7f7f8] text-gray-900">
         <div className="mx-auto max-w-4xl px-6 py-10">
           <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <h1 className="text-2xl font-bold">{sharedTitle}</h1>
-            <p className="mt-2 text-sm text-gray-500">
-              Shared conversation
-            </p>
+            <p className="mt-2 text-sm text-gray-500">Shared conversation</p>
             {selectedDocument && (
-              <p className="mt-1 text-sm text-gray-500">
-                File: {selectedDocument}
-              </p>
+              <p className="mt-1 text-sm text-gray-500">File: {selectedDocument}</p>
             )}
           </div>
 
@@ -720,7 +725,12 @@ export default function Home() {
                   onChange={async (e) => {
                     const value = e.target.value;
                     setSearchText(value);
-                    await fetchConversations(selectedDocument || undefined, false, undefined, value || undefined);
+                    await fetchConversations(
+                      selectedDocument || undefined,
+                      false,
+                      undefined,
+                      value || undefined
+                    );
                   }}
                   className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-sm text-gray-900 outline-none"
                 />
