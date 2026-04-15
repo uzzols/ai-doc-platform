@@ -170,6 +170,7 @@ export default function Home() {
       setFile(null);
       await fetchDocuments();
     } catch (error) {
+      console.error("Upload failed:", error);
       setMessage("Upload failed");
     } finally {
       setUploading(false);
@@ -177,27 +178,27 @@ export default function Home() {
   };
 
   const handleAsk = async () => {
-    if (!question.trim()) return;
+    if (!question.trim() || loading) return;
 
     if (!user?.id) {
       setAnswer("User not found. Please sign in again.");
       return;
     }
 
-    const currentQuestion = question;
+    const currentQuestion = question.trim();
     setQuestion("");
+    setAnswer("");
+    setDisplayedAnswer("");
+
+    const tempQuestion: ChatItem = {
+      question: currentQuestion,
+      answer: "",
+      created_at: new Date().toISOString(),
+      filename: selectedDocument || null,
+    };
 
     try {
       setLoading(true);
-      setAnswer("");
-
-      const tempQuestion: ChatItem = {
-        question: currentQuestion,
-        answer: "",
-        created_at: new Date().toISOString(),
-        filename: selectedDocument || null,
-      };
-
       setHistory((prev) => [...prev, tempQuestion]);
 
       const res = await fetch(`${BACKEND_URL}/ask`, {
@@ -215,18 +216,37 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        setAnswer(data.detail || data.error || "Error getting response");
+        const errorMessage = data.detail || data.error || "Error getting response";
+        setHistory((prev) =>
+          prev.map((item, index) =>
+            index === prev.length - 1 ? { ...item, answer: errorMessage } : item
+          )
+        );
+        setAnswer(errorMessage);
         return;
       }
 
       const finalAnswer = data.answer || "No response";
       setAnswer(finalAnswer);
 
-      setHistory((prev) => prev.slice(0, -1));
+      setHistory((prev) =>
+        prev.map((item, index) =>
+          index === prev.length - 1 ? { ...item, answer: finalAnswer } : item
+        )
+      );
+
       await fetchHistory();
     } catch (error) {
-      setAnswer("Error getting response");
-      setHistory((prev) => prev.slice(0, -1));
+      console.error("Error getting response:", error);
+      const errorMessage = "Error getting response";
+
+      setHistory((prev) =>
+        prev.map((item, index) =>
+          index === prev.length - 1 ? { ...item, answer: errorMessage } : item
+        )
+      );
+
+      setAnswer(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -322,9 +342,7 @@ export default function Home() {
                   </button>
                 </div>
 
-                {message && (
-                  <p className="mt-3 text-xs text-gray-600">{message}</p>
-                )}
+                {message && <p className="mt-3 text-xs text-gray-600">{message}</p>}
               </div>
 
               <div className="mb-4">
@@ -361,7 +379,7 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto space-y-2 pr-1">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {sortedDocuments.length === 0 ? (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
                     No documents yet
@@ -440,63 +458,51 @@ export default function Home() {
                   </div>
                 )}
 
-                {sortedHistory.map((item, index) => (
-                  <div key={item.id || `${item.question}-${index}`} className="space-y-4">
-                    <div className="flex justify-end">
-                      <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
-                        <p className="whitespace-pre-wrap text-sm leading-6">{item.question}</p>
+                {sortedHistory.map((item, index) => {
+                  const isLast = index === sortedHistory.length - 1;
+                  const showAnimatedAnswer =
+                    isLast && !!displayedAnswer && item.answer === answer;
+
+                  return (
+                    <div key={item.id || `${item.question}-${index}`} className="space-y-4">
+                      <div className="flex justify-end">
+                        <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
+                          <p className="whitespace-pre-wrap text-sm leading-6">
+                            {item.question}
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex justify-start">
-                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-                          AI
-                        </p>
-                        <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
-                          {item.answer}
-                        </p>
+                      <div className="flex justify-start">
+                        <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                            AI
+                          </p>
 
-                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-                          {item.filename && <span>File: {item.filename}</span>}
-                          {item.created_at && <span>{formatDate(item.created_at)}</span>}
+                          <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
+                            {showAnimatedAnswer ? displayedAnswer : item.answer}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+                            {item.filename && <span>File: {item.filename}</span>}
+                            {item.created_at && <span>{formatDate(item.created_at)}</span>}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
-                {loading && (
-                  <div className="space-y-4">
-                    <div className="flex justify-end">
-                      <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
-                        <p className="whitespace-pre-wrap text-sm leading-6">Thinking...</p>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-start">
-                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-                          AI
-                        </p>
-                        <div className="flex items-center gap-3 text-sm text-gray-700">
-                          <LoadingDots />
-                          Thinking...
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {!loading && displayedAnswer && (
+                {loading && sortedHistory.length > 0 && sortedHistory[sortedHistory.length - 1].answer === "" && (
                   <div className="flex justify-start">
                     <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
                         AI
                       </p>
-                      <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
-                        {displayedAnswer}
-                      </p>
+                      <div className="flex items-center gap-3 text-sm text-gray-700">
+                        <LoadingDots />
+                        Thinking...
+                      </div>
                     </div>
                   </div>
                 )}
