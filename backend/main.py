@@ -1,5 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -9,20 +10,23 @@ import pandas as pd
 import io
 import fitz
 import os
-import numpy as np
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
+import time
+import json
 
 load_dotenv()
 
 app = FastAPI(title="AI Document Platform API")
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://ai-doc-platform-zeta.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://ai-doc-platform-zeta.vercel.app",
+        FRONTEND_URL,
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -74,15 +78,6 @@ def get_embedding(text: str):
     return res.data[0].embedding
 
 
-def cosine_similarity(a, b):
-    a = np.array(a, dtype=float)
-    b = np.array(b, dtype=float)
-    denom = np.linalg.norm(a) * np.linalg.norm(b)
-    if denom == 0:
-        return 0.0
-    return float(np.dot(a, b) / denom)
-
-
 def extract_file_text(filename: str, contents: bytes):
     filename_lower = filename.lower()
     text = ""
@@ -124,15 +119,19 @@ def extract_file_text(filename: str, contents: bytes):
     return text, file_type
 
 
-def load_document_chunks(user_id: str, filename: str):
-    result = (
-        supabase.table("document_chunks")
-        .select("*")
-        .eq("user_id", user_id)
-        .eq("filename", filename)
-        .order("chunk_index", desc=False)
-        .execute()
-    )
+def get_relevant_chunks(user_id: str, filename: str, question: str, match_count: int = 3):
+    query_embedding = get_embedding(question)
+
+    result = supabase.rpc(
+        "match_documents",
+        {
+            "query_embedding": query_embedding,
+            "match_count": match_count,
+            "p_user_id": user_id,
+            "p_filename": filename,
+        },
+    ).execute()
+
     return result.data or []
 
 
@@ -165,7 +164,6 @@ def get_documents(user_id: str):
 @app.delete("/documents/{user_id}/{filename}")
 def delete_document(user_id: str, filename: str):
     try:
-        # delete related chats first
         convo_result = (
             supabase.table("conversations")
             .select("id")
@@ -180,6 +178,7 @@ def delete_document(user_id: str, filename: str):
 
         supabase.table("conversations").delete().eq("user_id", user_id).eq("filename", filename).execute()
         supabase.table("document_chunks").delete().eq("user_id", user_id).eq("filename", filename).execute()
+        supabase.table("document_chunks_v2").delete().eq("user_id", user_id).eq("filename", filename).execute()
         supabase.table("documents").delete().eq("user_id", user_id).eq("filename", filename).execute()
 
         return {"message": "Document and related chats deleted"}
@@ -363,42 +362,44 @@ async def upload_file(
     try:
         contents = await file.read()
         text, file_type = extract_file_text(file.filename, contents)
-
         chunks = chunk_text(text)
 
         # Remove prior stored chunks for same user/file, then replace
         supabase.table("document_chunks").delete().eq("user_id", user_id).eq("filename", file.filename).execute()
+        supabase.table("document_chunks_v2").delete().eq("user_id", user_id).eq("filename", file.filename).execute()
         supabase.table("documents").delete().eq("user_id", user_id).eq("filename", file.filename).execute()
 
-        rows = []
+        rows_v2 = []
+        now_iso = utc_now_iso()
+
         for idx, chunk in enumerate(chunks):
             emb = get_embedding(chunk)
-            rows.append({
+            rows_v2.append({
                 "user_id": user_id,
                 "filename": file.filename,
                 "chunk_index": idx,
                 "chunk_text": chunk,
                 "embedding": emb,
-                "created_at": utc_now_iso()
+                "created_at": now_iso
             })
 
-        # Insert in batches
         batch_size = 50
-        for i in range(0, len(rows), batch_size):
-            supabase.table("document_chunks").insert(rows[i:i + batch_size]).execute()
+        for i in range(0, len(rows_v2), batch_size):
+            supabase.table("document_chunks_v2").insert(rows_v2[i:i + batch_size]).execute()
 
         supabase.table("documents").insert({
             "user_id": user_id,
             "filename": file.filename,
             "file_type": file_type,
-            "uploaded_at": utc_now_iso()
+            "uploaded_at": now_iso
         }).execute()
 
         return {
             "message": "Upload successful",
             "filename": file.filename,
             "chunks": len(chunks),
-            "saved_to_supabase": True
+            "saved_to_supabase": True,
+            "vector_table": "document_chunks_v2"
         }
 
     except HTTPException:
@@ -410,6 +411,8 @@ async def upload_file(
 
 @app.post("/ask")
 def ask_ai(request: AskRequest):
+    start_time = time.time()
+
     try:
         if not request.conversation_id:
             return {
@@ -440,24 +443,20 @@ def ask_ai(request: AskRequest):
                 "saved_to_supabase": False
             }
 
-        stored_chunks = load_document_chunks(request.user_id, selected_filename)
+        matched_chunks = get_relevant_chunks(
+            request.user_id,
+            selected_filename,
+            request.question,
+            match_count=3
+        )
 
-        if not stored_chunks:
+        if not matched_chunks:
             return {
                 "answer": f"No stored chunks found for '{selected_filename}'. Please upload it again.",
                 "saved_to_supabase": False
             }
 
-        q_emb = get_embedding(request.question)
-
-        scored = []
-        for row in stored_chunks:
-            emb = row.get("embedding", [])
-            score = cosine_similarity(q_emb, emb)
-            scored.append((score, row["chunk_text"]))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top_chunks = [text for _, text in scored[:3]]
+        top_chunks = [row["chunk_text"] for row in matched_chunks]
         context = "\n\n".join(top_chunks)
 
         response = client.responses.create(
@@ -497,11 +496,24 @@ Question:
             "updated_at": now_iso
         }).eq("id", request.conversation_id).execute()
 
+        response_time_ms = int((time.time() - start_time) * 1000)
+
+        supabase.table("usage_events").insert({
+            "user_id": request.user_id,
+            "conversation_id": request.conversation_id,
+            "filename": selected_filename,
+            "question": request.question,
+            "model": "gpt-4.1-mini",
+            "response_time_ms": response_time_ms,
+            "created_at": now_iso
+        }).execute()
+
         return {
             "answer": final_answer,
             "saved_to_supabase": True,
             "conversation_id": request.conversation_id,
-            "title": new_title
+            "title": new_title,
+            "response_time_ms": response_time_ms
         }
 
     except Exception as e:
@@ -510,3 +522,114 @@ Question:
             "answer": f"Error: {str(e)}",
             "saved_to_supabase": False
         }
+
+
+@app.post("/ask-stream")
+def ask_ai_stream(request: AskRequest):
+    start_time = time.time()
+
+    try:
+        if not request.conversation_id:
+            raise HTTPException(status_code=400, detail="No active conversation selected.")
+
+        convo_result = (
+            supabase.table("conversations")
+            .select("*")
+            .eq("id", request.conversation_id)
+            .eq("user_id", request.user_id)
+            .execute()
+        )
+
+        if not convo_result.data:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+
+        conversation = convo_result.data[0]
+        selected_filename = request.filename or conversation.get("filename")
+
+        if not selected_filename:
+            raise HTTPException(status_code=400, detail="No document selected for this conversation.")
+
+        matched_chunks = get_relevant_chunks(
+            request.user_id,
+            selected_filename,
+            request.question,
+            match_count=3
+        )
+
+        if not matched_chunks:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No stored chunks found for '{selected_filename}'. Please upload it again."
+            )
+
+        top_chunks = [row["chunk_text"] for row in matched_chunks]
+        context = "\n\n".join(top_chunks)
+
+        def generate():
+            collected = []
+
+            stream = client.responses.create(
+                model="gpt-4.1-mini",
+                input=f"""
+Answer using only this context:
+
+{context}
+
+Question:
+{request.question}
+""",
+                stream=True
+            )
+
+            for event in stream:
+                if event.type == "response.output_text.delta":
+                    delta = event.delta
+                    collected.append(delta)
+                    yield f"data: {json.dumps({'token': delta})}\n\n"
+
+            final_answer = "".join(collected)
+            now_iso = utc_now_iso()
+
+            supabase.table("chat_history").insert({
+                "user_id": request.user_id,
+                "conversation_id": request.conversation_id,
+                "question": request.question,
+                "answer": final_answer,
+                "filename": selected_filename,
+                "created_at": now_iso
+            }).execute()
+
+            current_title = conversation.get("title") or "New Chat"
+            new_title = current_title
+
+            if current_title == "New Chat":
+                shortened = request.question.strip()
+                new_title = shortened[:40] + ("..." if len(shortened) > 40 else "")
+
+            supabase.table("conversations").update({
+                "title": new_title,
+                "filename": selected_filename,
+                "updated_at": now_iso
+            }).eq("id", request.conversation_id).execute()
+
+            response_time_ms = int((time.time() - start_time) * 1000)
+
+            supabase.table("usage_events").insert({
+                "user_id": request.user_id,
+                "conversation_id": request.conversation_id,
+                "filename": selected_filename,
+                "question": request.question,
+                "model": "gpt-4.1-mini",
+                "response_time_ms": response_time_ms,
+                "created_at": now_iso
+            }).execute()
+
+            yield f"data: {json.dumps({'done': True, 'title': new_title, 'response_time_ms': response_time_ms})}\n\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("ASK STREAM ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
