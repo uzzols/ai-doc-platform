@@ -8,3 +8,5 @@ PyMuPDF
 numpy
 python-docx
 supabase
+sentence-transformers==3.0.1
+torch==2.3.1
