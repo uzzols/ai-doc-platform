@@ -69,11 +69,15 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (filename?: string) => {
     if (!user?.id) return;
 
     try {
-      const res = await fetch(`${BACKEND_URL}/history/${user.id}`);
+      const url = filename
+        ? `${BACKEND_URL}/history/${user.id}?filename=${encodeURIComponent(filename)}`
+        : `${BACKEND_URL}/history/${user.id}`;
+
+      const res = await fetch(url);
       const data = await res.json();
 
       if (res.ok) {
@@ -95,8 +99,13 @@ export default function Home() {
         const docs = Array.isArray(data) ? data : [];
         setDocuments(docs);
 
-        if (!selectedDocument && docs.length > 0) {
-          setSelectedDocument(docs[0].filename);
+        if (docs.length > 0) {
+          const firstDoc = selectedDocument || docs[0].filename;
+          setSelectedDocument(firstDoc);
+          await fetchHistory(firstDoc);
+        } else {
+          setSelectedDocument("");
+          setHistory([]);
         }
       }
     } catch (error) {
@@ -106,7 +115,6 @@ export default function Home() {
 
   useEffect(() => {
     if (isSignedIn && user?.id) {
-      fetchHistory();
       fetchDocuments();
     }
   }, [isSignedIn, user?.id]);
@@ -167,8 +175,12 @@ export default function Home() {
       }
 
       setMessage("Upload successful.");
+      const uploadedFilename = data.filename || file.name;
       setFile(null);
+
       await fetchDocuments();
+      setSelectedDocument(uploadedFilename);
+      await fetchHistory(uploadedFilename);
     } catch (error) {
       console.error("Upload failed:", error);
       setMessage("Upload failed");
@@ -235,7 +247,7 @@ export default function Home() {
         )
       );
 
-      await fetchHistory();
+      await fetchHistory(selectedDocument || undefined);
     } catch (error) {
       console.error("Error getting response:", error);
       const errorMessage = "Error getting response";
@@ -262,6 +274,14 @@ export default function Home() {
     setHistory([]);
     setAnswer("");
     setDisplayedAnswer("");
+  };
+
+  const handleSelectDocument = async (filename: string) => {
+    setSelectedDocument(filename);
+    setAnswer("");
+    setDisplayedAnswer("");
+    setQuestion("");
+    await fetchHistory(filename);
   };
 
   const formatDate = (value?: string) => {
@@ -302,7 +322,7 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="flex w-[240px] flex-col border-r border-gray-200 bg-white p-3">
+            <aside className="flex w-[260px] flex-col border-r border-gray-200 bg-white p-3">
               <div className="mb-3 flex items-center justify-between">
                 <button
                   onClick={handleNewChat}
@@ -351,7 +371,7 @@ export default function Home() {
                 </label>
                 <select
                   value={selectedDocument}
-                  onChange={(e) => setSelectedDocument(e.target.value)}
+                  onChange={(e) => handleSelectDocument(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-xs text-gray-900"
                 >
                   {sortedDocuments.length === 0 ? (
@@ -370,7 +390,7 @@ export default function Home() {
               </div>
 
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-800">Files</p>
+                <p className="text-sm font-medium text-gray-800">Documents</p>
                 <button
                   onClick={handleClearLocalView}
                   className="text-xs text-gray-500 hover:text-black"
@@ -388,7 +408,7 @@ export default function Home() {
                   sortedDocuments.map((doc, index) => (
                     <button
                       key={doc.id || `${doc.filename}-${index}`}
-                      onClick={() => setSelectedDocument(doc.filename)}
+                      onClick={() => handleSelectDocument(doc.filename)}
                       className={`w-full rounded-xl border p-3 text-left transition ${
                         selectedDocument === doc.filename
                           ? "border-black bg-black text-white"
@@ -453,7 +473,9 @@ export default function Home() {
                       Ask your document anything
                     </h2>
                     <p className="text-gray-500">
-                      Upload a file, select it, and start chatting.
+                      {selectedDocument
+                        ? `No chat history yet for ${selectedDocument}`
+                        : "Upload a file, select it, and start chatting."}
                     </p>
                   </div>
                 )}
@@ -493,19 +515,21 @@ export default function Home() {
                   );
                 })}
 
-                {loading && sortedHistory.length > 0 && sortedHistory[sortedHistory.length - 1].answer === "" && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-                        AI
-                      </p>
-                      <div className="flex items-center gap-3 text-sm text-gray-700">
-                        <LoadingDots />
-                        Thinking...
+                {loading &&
+                  sortedHistory.length > 0 &&
+                  sortedHistory[sortedHistory.length - 1].answer === "" && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                          AI
+                        </p>
+                        <div className="flex items-center gap-3 text-sm text-gray-700">
+                          <LoadingDots />
+                          Thinking...
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
                 <div ref={chatEndRef} />
               </div>
@@ -537,7 +561,7 @@ export default function Home() {
 
                     <button
                       onClick={handleAsk}
-                      disabled={loading || !question.trim()}
+                      disabled={loading || !question.trim() || !selectedDocument}
                       className="rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {loading ? "Thinking..." : "Send"}
