@@ -102,7 +102,26 @@ export default function Home() {
     }
   };
 
-  const fetchConversations = async (filename?: string, preserveActive = true) => {
+  const fetchHistory = async (conversationId: string) => {
+    if (!conversationId) return;
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/history/${conversationId}`);
+      const data = await res.json();
+
+      if (res.ok) {
+        setHistory(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch history:", error);
+    }
+  };
+
+  const fetchConversations = async (
+    filename?: string,
+    preserveActive = true,
+    preferredConversationId?: string
+  ) => {
     if (!user?.id) return;
 
     try {
@@ -124,6 +143,16 @@ export default function Home() {
         return;
       }
 
+      if (preferredConversationId) {
+        const preferred = convos.find((c) => c.id === preferredConversationId);
+        if (preferred) {
+          setActiveConversationId(preferred.id);
+          setSelectedDocument(preferred.filename || filename || "");
+          await fetchHistory(preferred.id);
+          return;
+        }
+      }
+
       if (preserveActive && activeConversationId) {
         const existing = convos.find((c) => c.id === activeConversationId);
         if (existing) {
@@ -131,27 +160,14 @@ export default function Home() {
         }
       }
 
-      const first = convos[0];
-      setActiveConversationId(first.id);
-      setSelectedDocument(first.filename || filename || "");
-      await fetchHistory(first.id);
-    } catch (error) {
-      console.error("Failed to fetch conversations:", error);
-    }
-  };
-
-  const fetchHistory = async (conversationId: string) => {
-    if (!conversationId) return;
-
-    try {
-      const res = await fetch(`${BACKEND_URL}/history/${conversationId}`);
-      const data = await res.json();
-
-      if (res.ok) {
-        setHistory(Array.isArray(data) ? data : []);
+      if (!activeConversationId || !preserveActive) {
+        const first = convos[0];
+        setActiveConversationId(first.id);
+        setSelectedDocument(first.filename || filename || "");
+        await fetchHistory(first.id);
       }
     } catch (error) {
-      console.error("Failed to fetch history:", error);
+      console.error("Failed to fetch conversations:", error);
     }
   };
 
@@ -205,13 +221,21 @@ export default function Home() {
       const data = await res.json();
 
       if (res.ok && data?.id) {
-        setActiveConversationId(data.id);
-        setSelectedDocument(data.filename || filename || "");
+        const newConversation = data;
+
+        setActiveConversationId(newConversation.id);
+        setSelectedDocument(newConversation.filename || filename || "");
+        setConversations((prev) => [newConversation, ...prev]);
         setHistory([]);
         setQuestion("");
         setAnswer("");
         setDisplayedAnswer("");
-        await fetchConversations(filename, false);
+
+        await fetchConversations(
+          newConversation.filename || filename || undefined,
+          true,
+          newConversation.id
+        );
       }
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -254,6 +278,7 @@ export default function Home() {
       setFile(null);
 
       await fetchDocuments();
+      setSelectedDocument(uploadedFilename);
       await createNewConversation(uploadedFilename);
     } catch (error) {
       console.error("Upload failed:", error);
@@ -333,7 +358,7 @@ export default function Home() {
       );
 
       await fetchHistory(activeConversationId);
-      await fetchConversations(selectedDocument, true);
+      await fetchConversations(selectedDocument, true, activeConversationId);
     } catch (error) {
       console.error("Error getting response:", error);
       const errorMessage = "Error getting response";
@@ -368,7 +393,12 @@ export default function Home() {
   };
 
   const handleNewChat = async () => {
-    await createNewConversation(selectedDocument || undefined);
+    if (!selectedDocument) {
+      alert("Please select a document first.");
+      return;
+    }
+
+    await createNewConversation(selectedDocument);
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
