@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useUser, UserButton } from "@clerk/nextjs";
 
 type ChatItem = {
@@ -25,6 +26,8 @@ type ConversationItem = {
   filename?: string | null;
   created_at?: string;
   updated_at?: string;
+  is_public?: boolean;
+  share_token?: string | null;
 };
 
 function LoadingDots() {
@@ -39,6 +42,8 @@ function LoadingDots() {
 
 export default function Home() {
   const { isSignedIn, user } = useUser();
+  const searchParams = useSearchParams();
+  const shareToken = searchParams.get("share");
 
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
@@ -47,6 +52,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
+  const [searchText, setSearchText] = useState("");
+  const [renamingConversationId, setRenamingConversationId] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const [shareLink, setShareLink] = useState("");
+  const [sharedView, setSharedView] = useState(false);
+  const [sharedTitle, setSharedTitle] = useState("");
 
   const [history, setHistory] = useState<ChatItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -56,8 +67,10 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const BACKEND_URL = "https://ai-doc-platform-24cv.onrender.com";
+  const FRONTEND_URL = "https://ai-doc-platform-zeta.vercel.app";
 
   const sortedHistory = useMemo(() => {
     return [...history].sort((a, b) => {
@@ -85,6 +98,22 @@ export default function Home() {
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const fetchSharedConversation = async (token: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/shared/${token}`);
+      const data = await res.json();
+
+      if (res.ok) {
+        setSharedView(true);
+        setSharedTitle(data.conversation?.title || "Shared conversation");
+        setSelectedDocument(data.conversation?.filename || "");
+        setHistory(Array.isArray(data.messages) ? data.messages : []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch shared conversation:", error);
+    }
   };
 
   const fetchDocuments = async () => {
@@ -120,14 +149,18 @@ export default function Home() {
   const fetchConversations = async (
     filename?: string,
     preserveActive = true,
-    preferredConversationId?: string
+    preferredConversationId?: string,
+    search?: string
   ) => {
     if (!user?.id) return;
 
     try {
-      const url = filename
-        ? `${BACKEND_URL}/conversations/${user.id}?filename=${encodeURIComponent(filename)}`
-        : `${BACKEND_URL}/conversations/${user.id}`;
+      const params = new URLSearchParams();
+      if (filename) params.set("filename", filename);
+      if (search) params.set("search", search);
+
+      const qs = params.toString();
+      const url = `${BACKEND_URL}/conversations/${user.id}${qs ? `?${qs}` : ""}`;
 
       const res = await fetch(url);
       const data = await res.json();
@@ -172,11 +205,16 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (shareToken) {
+      fetchSharedConversation(shareToken);
+      return;
+    }
+
     if (isSignedIn && user?.id) {
       fetchDocuments();
       fetchConversations();
     }
-  }, [isSignedIn, user?.id]);
+  }, [isSignedIn, user?.id, shareToken]);
 
   useEffect(() => {
     scrollToBottom();
@@ -230,12 +268,18 @@ export default function Home() {
         setQuestion("");
         setAnswer("");
         setDisplayedAnswer("");
+        setShareLink("");
 
         await fetchConversations(
           newConversation.filename || filename || undefined,
           true,
-          newConversation.id
+          newConversation.id,
+          searchText || undefined
         );
+
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 100);
       }
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -290,17 +334,11 @@ export default function Home() {
 
   const handleAsk = async () => {
     if (!question.trim() || loading) return;
-
-    if (!user?.id) {
-      setAnswer("User not found. Please sign in again.");
-      return;
-    }
-
+    if (!user?.id) return;
     if (!activeConversationId) {
       setAnswer("Please start or select a conversation first.");
       return;
     }
-
     if (!selectedDocument) {
       setAnswer("Please select a document first.");
       return;
@@ -358,7 +396,7 @@ export default function Home() {
       );
 
       await fetchHistory(activeConversationId);
-      await fetchConversations(selectedDocument, true, activeConversationId);
+      await fetchConversations(selectedDocument, true, activeConversationId, searchText || undefined);
     } catch (error) {
       console.error("Error getting response:", error);
       const errorMessage = "Error getting response";
@@ -381,6 +419,7 @@ export default function Home() {
     setQuestion("");
     setAnswer("");
     setDisplayedAnswer("");
+    setShareLink("");
     await fetchHistory(conversation.id);
   };
 
@@ -389,7 +428,8 @@ export default function Home() {
     setQuestion("");
     setAnswer("");
     setDisplayedAnswer("");
-    await fetchConversations(filename, false);
+    setShareLink("");
+    await fetchConversations(filename, false, undefined, searchText || undefined);
   };
 
   const handleNewChat = async () => {
@@ -397,6 +437,11 @@ export default function Home() {
       alert("Please select a document first.");
       return;
     }
+
+    setHistory([]);
+    setQuestion("");
+    setAnswer("");
+    setDisplayedAnswer("");
 
     await createNewConversation(selectedDocument);
   };
@@ -413,11 +458,94 @@ export default function Home() {
         setQuestion("");
         setAnswer("");
         setDisplayedAnswer("");
+        setShareLink("");
       }
 
-      await fetchConversations(selectedDocument || undefined, false);
+      await fetchConversations(selectedDocument || undefined, false, undefined, searchText || undefined);
     } catch (error) {
       console.error("Failed to delete conversation:", error);
+    }
+  };
+
+  const handleRenameConversation = async (conversationId: string) => {
+    const title = renameValue.trim();
+    if (!title) return;
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title }),
+      });
+
+      if (res.ok) {
+        setRenamingConversationId("");
+        setRenameValue("");
+        await fetchConversations(selectedDocument || undefined, true, activeConversationId, searchText || undefined);
+      }
+    } catch (error) {
+      console.error("Failed to rename conversation:", error);
+    }
+  };
+
+  const handleShareConversation = async (conversationId: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/conversations/${conversationId}/share`, {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (res.ok && data?.share_path) {
+        const fullUrl = `${FRONTEND_URL}/${data.share_path}`;
+        setShareLink(fullUrl);
+        await navigator.clipboard.writeText(fullUrl);
+        alert("Share link copied to clipboard");
+      }
+    } catch (error) {
+      console.error("Failed to share conversation:", error);
+    }
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!selectedDocument || !user?.id) return;
+
+    const confirmed = window.confirm(
+      `Delete "${selectedDocument}" and all chats linked to it?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const encodedFilename = encodeURIComponent(selectedDocument);
+      const res = await fetch(`${BACKEND_URL}/documents/${user.id}/${encodedFilename}`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        setActiveConversationId("");
+        setHistory([]);
+        setQuestion("");
+        setAnswer("");
+        setDisplayedAnswer("");
+        setShareLink("");
+
+        await fetchDocuments();
+
+        const remainingDocs = sortedDocuments.filter((d) => d.filename !== selectedDocument);
+        const nextDoc = remainingDocs[0]?.filename || "";
+        setSelectedDocument(nextDoc);
+
+        if (nextDoc) {
+          await fetchConversations(nextDoc, false, undefined, searchText || undefined);
+        } else {
+          setConversations([]);
+          setHistory([]);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete document:", error);
     }
   };
 
@@ -429,6 +557,54 @@ export default function Home() {
       return value;
     }
   };
+
+  if (shareToken && sharedView) {
+    return (
+      <main className="min-h-screen bg-[#f7f7f8] text-gray-900">
+        <div className="mx-auto max-w-4xl px-6 py-10">
+          <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h1 className="text-2xl font-bold">{sharedTitle}</h1>
+            <p className="mt-2 text-sm text-gray-500">
+              Shared conversation
+            </p>
+            {selectedDocument && (
+              <p className="mt-1 text-sm text-gray-500">
+                File: {selectedDocument}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-6">
+            {sortedHistory.map((item, index) => (
+              <div key={item.id || `${item.question}-${index}`} className="space-y-4">
+                <div className="flex justify-end">
+                  <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
+                    <p className="whitespace-pre-wrap text-sm leading-6">
+                      {item.question}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-start">
+                  <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                      AI
+                    </p>
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
+                      {item.answer}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+                      {item.created_at && <span>{formatDate(item.created_at)}</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="h-screen bg-[#f7f7f8] text-gray-900">
@@ -459,7 +635,7 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="flex w-[290px] flex-col border-r border-gray-200 bg-white p-3">
+            <aside className="flex w-[320px] flex-col border-r border-gray-200 bg-white p-3">
               <div className="mb-3">
                 <button
                   onClick={handleNewChat}
@@ -502,14 +678,14 @@ export default function Home() {
                 {message && <p className="mt-3 text-xs text-gray-600">{message}</p>}
               </div>
 
-              <div className="mb-4">
+              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <label className="mb-2 block text-sm font-medium text-gray-800">
                   Uploaded document
                 </label>
                 <select
                   value={selectedDocument}
                   onChange={(e) => handleDocumentChange(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-xs text-gray-900"
+                  className="mb-3 w-full rounded-lg border border-gray-200 bg-white p-2.5 text-xs text-gray-900"
                 >
                   {sortedDocuments.length === 0 ? (
                     <option value="">No documents uploaded</option>
@@ -524,6 +700,30 @@ export default function Home() {
                     ))
                   )}
                 </select>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDeleteDocument}
+                    disabled={!selectedDocument}
+                    className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Delete document
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <input
+                  type="text"
+                  placeholder="Search chats..."
+                  value={searchText}
+                  onChange={async (e) => {
+                    const value = e.target.value;
+                    setSearchText(value);
+                    await fetchConversations(selectedDocument || undefined, false, undefined, value || undefined);
+                  }}
+                  className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-sm text-gray-900 outline-none"
+                />
               </div>
 
               <div className="mb-2 text-sm font-medium text-gray-800">
@@ -539,40 +739,96 @@ export default function Home() {
                   sortedConversations.map((conversation) => (
                     <div
                       key={conversation.id}
-                      className={`group rounded-xl border p-3 transition ${
+                      className={`rounded-xl border p-3 transition ${
                         activeConversationId === conversation.id
                           ? "border-black bg-black text-white"
                           : "border-gray-200 bg-white hover:bg-gray-50"
                       }`}
                     >
-                      <button
-                        onClick={() => handleSelectConversation(conversation)}
-                        className="w-full text-left"
-                      >
-                        <p className="truncate text-sm font-medium">
-                          {conversation.title || "New Chat"}
-                        </p>
-                        <p
-                          className={`mt-1 truncate text-[11px] ${
-                            activeConversationId === conversation.id
-                              ? "text-gray-300"
-                              : "text-gray-500"
-                          }`}
-                        >
-                          {conversation.filename || "No document selected"}
-                        </p>
-                      </button>
+                      {renamingConversationId === conversation.id ? (
+                        <div className="space-y-2">
+                          <input
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            className="w-full rounded-lg border border-gray-300 bg-white p-2 text-sm text-black outline-none"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleRenameConversation(conversation.id)}
+                              className="rounded-lg bg-white px-2 py-1 text-xs text-black"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => {
+                                setRenamingConversationId("");
+                                setRenameValue("");
+                              }}
+                              className="rounded-lg bg-white px-2 py-1 text-xs text-black"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleSelectConversation(conversation)}
+                            className="w-full text-left"
+                          >
+                            <p className="truncate text-sm font-medium">
+                              {conversation.title || "New Chat"}
+                            </p>
+                            <p
+                              className={`mt-1 truncate text-[11px] ${
+                                activeConversationId === conversation.id
+                                  ? "text-gray-300"
+                                  : "text-gray-500"
+                              }`}
+                            >
+                              {conversation.filename || "No document selected"}
+                            </p>
+                          </button>
 
-                      <button
-                        onClick={() => handleDeleteConversation(conversation.id)}
-                        className={`mt-2 text-[11px] ${
-                          activeConversationId === conversation.id
-                            ? "text-gray-300 hover:text-white"
-                            : "text-gray-500 hover:text-black"
-                        }`}
-                      >
-                        Delete
-                      </button>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => {
+                                setRenamingConversationId(conversation.id);
+                                setRenameValue(conversation.title || "");
+                              }}
+                              className={`text-[11px] ${
+                                activeConversationId === conversation.id
+                                  ? "text-gray-300 hover:text-white"
+                                  : "text-gray-500 hover:text-black"
+                              }`}
+                            >
+                              Rename
+                            </button>
+
+                            <button
+                              onClick={() => handleShareConversation(conversation.id)}
+                              className={`text-[11px] ${
+                                activeConversationId === conversation.id
+                                  ? "text-gray-300 hover:text-white"
+                                  : "text-gray-500 hover:text-black"
+                              }`}
+                            >
+                              Share
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteConversation(conversation.id)}
+                              className={`text-[11px] ${
+                                activeConversationId === conversation.id
+                                  ? "text-gray-300 hover:text-white"
+                                  : "text-gray-500 hover:text-black"
+                              }`}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))
                 )}
@@ -615,6 +871,13 @@ export default function Home() {
 
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-6">
+                {shareLink && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
+                    Share link copied:
+                    <div className="mt-2 break-all text-xs text-gray-500">{shareLink}</div>
+                  </div>
+                )}
+
                 {sortedHistory.length === 0 && !loading && !displayedAnswer && (
                   <div className="mt-20 text-center">
                     <h2 className="mb-3 text-4xl font-semibold text-gray-900">
@@ -687,6 +950,7 @@ export default function Home() {
               <div className="mx-auto w-full max-w-5xl">
                 <div className="rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
                   <textarea
+                    ref={inputRef}
                     placeholder="Message your document..."
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
