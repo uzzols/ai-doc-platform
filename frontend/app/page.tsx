@@ -240,26 +240,6 @@ export default function Home() {
     scrollToBottom();
   }, [sortedHistory, displayedAnswer, loading]);
 
-  useEffect(() => {
-    if (!answer) {
-      setDisplayedAnswer("");
-      return;
-    }
-
-    let index = 0;
-    setDisplayedAnswer("");
-
-    const interval = setInterval(() => {
-      index += 1;
-      setDisplayedAnswer(answer.slice(0, index));
-      if (index >= answer.length) {
-        clearInterval(interval);
-      }
-    }, 8);
-
-    return () => clearInterval(interval);
-  }, [answer]);
-
   const createNewConversation = async (filename?: string) => {
     if (!user?.id) return null;
 
@@ -351,7 +331,13 @@ export default function Home() {
       await fetchDocuments();
       setSelectedDocument(uploadedFilename);
 
-      const convos = await fetchConversations(uploadedFilename, false, undefined, searchText || undefined);
+      const convos = await fetchConversations(
+        uploadedFilename,
+        false,
+        undefined,
+        searchText || undefined
+      );
+
       if (!convos || convos.length === 0) {
         await createNewConversation(uploadedFilename);
       }
@@ -399,7 +385,7 @@ export default function Home() {
       setLoading(true);
       setHistory((prev) => [...prev, tempQuestion]);
 
-      const res = await fetch(`${BACKEND_URL}/ask`, {
+      const res = await fetch(`${BACKEND_URL}/ask-stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -412,10 +398,11 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        const errorMessage = data.detail || data.error || "Error getting response";
+        const errorData = await res.json().catch(() => null);
+        const errorMessage =
+          errorData?.detail || errorData?.error || "Error getting response";
+
         setHistory((prev) =>
           prev.map((item, index) =>
             index === prev.length - 1 ? { ...item, answer: errorMessage } : item
@@ -425,32 +412,75 @@ export default function Home() {
         return;
       }
 
-      const finalAnswer = data.answer || "No response";
-      setAnswer(finalAnswer);
+      if (!res.body) {
+        throw new Error("No response stream");
+      }
 
-      setHistory((prev) =>
-        prev.map((item, index) =>
-          index === prev.length - 1 ? { ...item, answer: finalAnswer } : item
-        )
-      );
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
 
-      await fetchHistory(conversationId);
-      await fetchConversations(
-        selectedDocument,
-        true,
-        conversationId,
-        searchText || undefined
-      );
+      let finalText = "";
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const eventChunk of events) {
+          const lines = eventChunk.split("\n");
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+
+            const jsonStr = line.replace("data: ", "").trim();
+
+            try {
+              const data = JSON.parse(jsonStr);
+
+              if (data.token) {
+                finalText += data.token;
+                setAnswer(finalText);
+                setDisplayedAnswer(finalText);
+
+                setHistory((prev) =>
+                  prev.map((item, index) =>
+                    index === prev.length - 1
+                      ? { ...item, answer: finalText }
+                      : item
+                  )
+                );
+              }
+
+              if (data.done) {
+                await fetchHistory(conversationId);
+                await fetchConversations(
+                  selectedDocument,
+                  true,
+                  conversationId,
+                  searchText || undefined
+                );
+              }
+            } catch (e) {
+              console.error("Stream parse error:", e);
+            }
+          }
+        }
+      }
     } catch (error) {
-      console.error("Error getting response:", error);
+      console.error("Streaming error:", error);
+
       const errorMessage = "Error getting response";
 
       setHistory((prev) =>
         prev.map((item, index) =>
-          index === prev.length - 1 ? { ...item, answer: errorMessage } : item
+          index === prev.length - 1
+            ? { ...item, answer: errorMessage }
+            : item
         )
       );
-
       setAnswer(errorMessage);
     } finally {
       setLoading(false);
@@ -996,40 +1026,34 @@ export default function Home() {
                   </div>
                 )}
 
-                {sortedHistory.map((item, index) => {
-                  const isLast = index === sortedHistory.length - 1;
-                  const showAnimatedAnswer =
-                    isLast && !!displayedAnswer && item.answer === answer;
-
-                  return (
-                    <div key={item.id || `${item.question}-${index}`} className="space-y-4">
-                      <div className="flex justify-end">
-                        <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
-                          <p className="whitespace-pre-wrap text-sm leading-6">
-                            {item.question}
-                          </p>
-                        </div>
+                {sortedHistory.map((item, index) => (
+                  <div key={item.id || `${item.question}-${index}`} className="space-y-4">
+                    <div className="flex justify-end">
+                      <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
+                        <p className="whitespace-pre-wrap text-sm leading-6">
+                          {item.question}
+                        </p>
                       </div>
+                    </div>
 
-                      <div className="flex justify-start">
-                        <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-                            AI
-                          </p>
+                    <div className="flex justify-start">
+                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                          AI
+                        </p>
 
-                          <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
-                            {showAnimatedAnswer ? displayedAnswer : item.answer}
-                          </p>
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
+                          {item.answer}
+                        </p>
 
-                          <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-                            {item.filename && <span>File: {item.filename}</span>}
-                            {item.created_at && <span>{formatDate(item.created_at)}</span>}
-                          </div>
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+                          {item.filename && <span>File: {item.filename}</span>}
+                          {item.created_at && <span>{formatDate(item.created_at)}</span>}
                         </div>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
 
                 {loading &&
                   sortedHistory.length > 0 &&
