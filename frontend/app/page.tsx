@@ -102,24 +102,39 @@ export default function Home() {
     }
   };
 
-  const fetchConversations = async () => {
+  const fetchConversations = async (filename?: string, preserveActive = true) => {
     if (!user?.id) return;
 
     try {
-      const res = await fetch(`${BACKEND_URL}/conversations/${user.id}`);
+      const url = filename
+        ? `${BACKEND_URL}/conversations/${user.id}?filename=${encodeURIComponent(filename)}`
+        : `${BACKEND_URL}/conversations/${user.id}`;
+
+      const res = await fetch(url);
       const data = await res.json();
 
-      if (res.ok) {
-        const convos = Array.isArray(data) ? data : [];
-        setConversations(convos);
+      if (!res.ok) return;
 
-        if (!activeConversationId && convos.length > 0) {
-          const first = convos[0];
-          setActiveConversationId(first.id);
-          setSelectedDocument(first.filename || "");
-          await fetchHistory(first.id);
+      const convos = Array.isArray(data) ? data : [];
+      setConversations(convos);
+
+      if (convos.length === 0) {
+        setActiveConversationId("");
+        setHistory([]);
+        return;
+      }
+
+      if (preserveActive && activeConversationId) {
+        const existing = convos.find((c) => c.id === activeConversationId);
+        if (existing) {
+          return;
         }
       }
+
+      const first = convos[0];
+      setActiveConversationId(first.id);
+      setSelectedDocument(first.filename || filename || "");
+      await fetchHistory(first.id);
     } catch (error) {
       console.error("Failed to fetch conversations:", error);
     }
@@ -196,7 +211,7 @@ export default function Home() {
         setQuestion("");
         setAnswer("");
         setDisplayedAnswer("");
-        await fetchConversations();
+        await fetchConversations(filename, false);
       }
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -239,8 +254,6 @@ export default function Home() {
       setFile(null);
 
       await fetchDocuments();
-
-      // Start a new chat for the uploaded file
       await createNewConversation(uploadedFilename);
     } catch (error) {
       console.error("Upload failed:", error);
@@ -320,7 +333,7 @@ export default function Home() {
       );
 
       await fetchHistory(activeConversationId);
-      await fetchConversations();
+      await fetchConversations(selectedDocument, true);
     } catch (error) {
       console.error("Error getting response:", error);
       const errorMessage = "Error getting response";
@@ -348,24 +361,10 @@ export default function Home() {
 
   const handleDocumentChange = async (filename: string) => {
     setSelectedDocument(filename);
-
-    if (!activeConversationId) return;
-
-    try {
-      await fetch(`${BACKEND_URL}/conversations/${activeConversationId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          filename,
-        }),
-      });
-
-      await fetchConversations();
-    } catch (error) {
-      console.error("Failed to update conversation document:", error);
-    }
+    setQuestion("");
+    setAnswer("");
+    setDisplayedAnswer("");
+    await fetchConversations(filename, false);
   };
 
   const handleNewChat = async () => {
@@ -386,7 +385,7 @@ export default function Home() {
         setDisplayedAnswer("");
       }
 
-      await fetchConversations();
+      await fetchConversations(selectedDocument || undefined, false);
     } catch (error) {
       console.error("Failed to delete conversation:", error);
     }
@@ -475,7 +474,7 @@ export default function Home() {
 
               <div className="mb-4">
                 <label className="mb-2 block text-sm font-medium text-gray-800">
-                  Current document
+                  Uploaded document
                 </label>
                 <select
                   value={selectedDocument}
@@ -497,12 +496,14 @@ export default function Home() {
                 </select>
               </div>
 
-              <div className="mb-2 text-sm font-medium text-gray-800">Chats</div>
+              <div className="mb-2 text-sm font-medium text-gray-800">
+                Chats for selected document
+              </div>
 
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {sortedConversations.length === 0 ? (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
-                    No conversations yet
+                    No chats for this document yet
                   </div>
                 ) : (
                   sortedConversations.map((conversation) => (
@@ -592,7 +593,7 @@ export default function Home() {
                     <p className="text-gray-500">
                       {activeConversationId
                         ? "This conversation is empty. Ask your first question."
-                        : "Start a new chat from the left sidebar."}
+                        : "Pick a document from the dropdown or start a new chat."}
                     </p>
                   </div>
                 )}
