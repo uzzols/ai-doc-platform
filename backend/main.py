@@ -6,11 +6,12 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from docx import Document
 from supabase import create_client, Client
+from sentence_transformers import CrossEncoder
 import pandas as pd
 import io
 import fitz
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import uuid
 import time
@@ -21,6 +22,19 @@ load_dotenv()
 app = FastAPI(title="AI Document Platform API")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://ai-doc-platform-zeta.vercel.app")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+RERANKER_MODEL = os.getenv(
+    "RERANKER_MODEL",
+    "cross-encoder/ms-marco-MiniLM-L6-v2"
+)
+
+if not OPENAI_API_KEY:
+    raise ValueError("Missing OPENAI_API_KEY")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    raise ValueError("Missing Supabase environment variables")
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,15 +47,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=OPENAI_API_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-
-if not supabase_url or not supabase_key:
-    raise ValueError("Missing Supabase environment variables")
-
-supabase: Client = create_client(supabase_url, supabase_key)
+# Load reranker once at startup
+reranker = CrossEncoder(RERANKER_MODEL)
 
 
 class AskRequest(BaseModel):
@@ -66,11 +76,11 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def chunk_text(text: str, size: int = 1000):
+def chunk_text(text: str, size: int = 1000) -> List[str]:
     return [text[i:i + size] for i in range(0, len(text), size) if text[i:i + size].strip()]
 
 
-def get_embedding(text: str):
+def get_embedding(text: str) -> List[float]:
     res = client.embeddings.create(
         model="text-embedding-3-small",
         input=text
@@ -119,7 +129,12 @@ def extract_file_text(filename: str, contents: bytes):
     return text, file_type
 
 
-def get_relevant_chunks(user_id: str, filename: str, question: str, match_count: int = 3):
+def get_relevant_chunks(
+    user_id: str,
+    filename: str,
+    question: str,
+    match_count: int = 10
+) -> List[Dict[str, Any]]:
     query_embedding = get_embedding(question)
 
     result = supabase.rpc(
@@ -133,6 +148,86 @@ def get_relevant_chunks(user_id: str, filename: str, question: str, match_count:
     ).execute()
 
     return result.data or []
+
+
+def rerank_chunks(
+    question: str,
+    matched_chunks: List[Dict[str, Any]],
+    top_n: int = 3
+) -> List[Dict[str, Any]]:
+    if not matched_chunks:
+        return []
+
+    pairs = [(question, row["chunk_text"]) for row in matched_chunks]
+    scores = reranker.predict(pairs)
+
+    rescored = []
+    for row, score in zip(matched_chunks, scores):
+        rescored.append({
+            **row,
+            "rerank_score": float(score)
+        })
+
+    rescored.sort(key=lambda x: x["rerank_score"], reverse=True)
+    return rescored[:top_n]
+
+
+def build_context_from_chunks(chunks: List[Dict[str, Any]]) -> str:
+    return "\n\n".join([row["chunk_text"] for row in chunks if row.get("chunk_text")])
+
+
+def get_conversation_for_user(conversation_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    convo_result = (
+        supabase.table("conversations")
+        .select("*")
+        .eq("id", conversation_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return convo_result.data[0] if convo_result.data else None
+
+
+def update_conversation_metadata(
+    conversation: Dict[str, Any],
+    conversation_id: str,
+    question: str,
+    filename: str,
+    now_iso: str
+) -> str:
+    current_title = conversation.get("title") or "New Chat"
+    new_title = current_title
+
+    if current_title == "New Chat":
+        shortened = question.strip()
+        new_title = shortened[:40] + ("..." if len(shortened) > 40 else "")
+
+    supabase.table("conversations").update({
+        "title": new_title,
+        "filename": filename,
+        "updated_at": now_iso
+    }).eq("id", conversation_id).execute()
+
+    return new_title
+
+
+def insert_usage_event(
+    user_id: str,
+    conversation_id: Optional[str],
+    filename: Optional[str],
+    question: str,
+    model: str,
+    response_time_ms: int,
+    now_iso: str
+):
+    supabase.table("usage_events").insert({
+        "user_id": user_id,
+        "conversation_id": conversation_id,
+        "filename": filename,
+        "question": question,
+        "model": model,
+        "response_time_ms": response_time_ms,
+        "created_at": now_iso
+    }).execute()
 
 
 @app.get("/")
@@ -399,7 +494,8 @@ async def upload_file(
             "filename": file.filename,
             "chunks": len(chunks),
             "saved_to_supabase": True,
-            "vector_table": "document_chunks_v2"
+            "vector_table": "document_chunks_v2",
+            "reranker_model": RERANKER_MODEL
         }
 
     except HTTPException:
@@ -420,21 +516,14 @@ def ask_ai(request: AskRequest):
                 "saved_to_supabase": False
             }
 
-        convo_result = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("id", request.conversation_id)
-            .eq("user_id", request.user_id)
-            .execute()
-        )
+        conversation = get_conversation_for_user(request.conversation_id, request.user_id)
 
-        if not convo_result.data:
+        if not conversation:
             return {
                 "answer": "Conversation not found.",
                 "saved_to_supabase": False
             }
 
-        conversation = convo_result.data[0]
         selected_filename = request.filename or conversation.get("filename")
 
         if not selected_filename:
@@ -447,7 +536,7 @@ def ask_ai(request: AskRequest):
             request.user_id,
             selected_filename,
             request.question,
-            match_count=3
+            match_count=10
         )
 
         if not matched_chunks:
@@ -456,8 +545,8 @@ def ask_ai(request: AskRequest):
                 "saved_to_supabase": False
             }
 
-        top_chunks = [row["chunk_text"] for row in matched_chunks]
-        context = "\n\n".join(top_chunks)
+        reranked_chunks = rerank_chunks(request.question, matched_chunks, top_n=3)
+        context = build_context_from_chunks(reranked_chunks)
 
         response = client.responses.create(
             model="gpt-4.1-mini",
@@ -483,37 +572,35 @@ Question:
             "created_at": now_iso
         }).execute()
 
-        current_title = conversation.get("title") or "New Chat"
-        new_title = current_title
-
-        if current_title == "New Chat":
-            shortened = request.question.strip()
-            new_title = shortened[:40] + ("..." if len(shortened) > 40 else "")
-
-        supabase.table("conversations").update({
-            "title": new_title,
-            "filename": selected_filename,
-            "updated_at": now_iso
-        }).eq("id", request.conversation_id).execute()
+        new_title = update_conversation_metadata(
+            conversation=conversation,
+            conversation_id=request.conversation_id,
+            question=request.question,
+            filename=selected_filename,
+            now_iso=now_iso
+        )
 
         response_time_ms = int((time.time() - start_time) * 1000)
 
-        supabase.table("usage_events").insert({
-            "user_id": request.user_id,
-            "conversation_id": request.conversation_id,
-            "filename": selected_filename,
-            "question": request.question,
-            "model": "gpt-4.1-mini",
-            "response_time_ms": response_time_ms,
-            "created_at": now_iso
-        }).execute()
+        insert_usage_event(
+            user_id=request.user_id,
+            conversation_id=request.conversation_id,
+            filename=selected_filename,
+            question=request.question,
+            model="gpt-4.1-mini",
+            response_time_ms=response_time_ms,
+            now_iso=now_iso
+        )
 
         return {
             "answer": final_answer,
             "saved_to_supabase": True,
             "conversation_id": request.conversation_id,
             "title": new_title,
-            "response_time_ms": response_time_ms
+            "response_time_ms": response_time_ms,
+            "retrieved_count": len(matched_chunks),
+            "reranked_count": len(reranked_chunks),
+            "reranker_model": RERANKER_MODEL
         }
 
     except Exception as e:
@@ -532,18 +619,11 @@ def ask_ai_stream(request: AskRequest):
         if not request.conversation_id:
             raise HTTPException(status_code=400, detail="No active conversation selected.")
 
-        convo_result = (
-            supabase.table("conversations")
-            .select("*")
-            .eq("id", request.conversation_id)
-            .eq("user_id", request.user_id)
-            .execute()
-        )
+        conversation = get_conversation_for_user(request.conversation_id, request.user_id)
 
-        if not convo_result.data:
+        if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
-        conversation = convo_result.data[0]
         selected_filename = request.filename or conversation.get("filename")
 
         if not selected_filename:
@@ -553,7 +633,7 @@ def ask_ai_stream(request: AskRequest):
             request.user_id,
             selected_filename,
             request.question,
-            match_count=3
+            match_count=10
         )
 
         if not matched_chunks:
@@ -562,11 +642,11 @@ def ask_ai_stream(request: AskRequest):
                 detail=f"No stored chunks found for '{selected_filename}'. Please upload it again."
             )
 
-        top_chunks = [row["chunk_text"] for row in matched_chunks]
-        context = "\n\n".join(top_chunks)
+        reranked_chunks = rerank_chunks(request.question, matched_chunks, top_n=3)
+        context = build_context_from_chunks(reranked_chunks)
 
         def generate():
-            collected = []
+            collected: List[str] = []
 
             stream = client.responses.create(
                 model="gpt-4.1-mini",
@@ -599,32 +679,34 @@ Question:
                 "created_at": now_iso
             }).execute()
 
-            current_title = conversation.get("title") or "New Chat"
-            new_title = current_title
-
-            if current_title == "New Chat":
-                shortened = request.question.strip()
-                new_title = shortened[:40] + ("..." if len(shortened) > 40 else "")
-
-            supabase.table("conversations").update({
-                "title": new_title,
-                "filename": selected_filename,
-                "updated_at": now_iso
-            }).eq("id", request.conversation_id).execute()
+            new_title = update_conversation_metadata(
+                conversation=conversation,
+                conversation_id=request.conversation_id,
+                question=request.question,
+                filename=selected_filename,
+                now_iso=now_iso
+            )
 
             response_time_ms = int((time.time() - start_time) * 1000)
 
-            supabase.table("usage_events").insert({
-                "user_id": request.user_id,
-                "conversation_id": request.conversation_id,
-                "filename": selected_filename,
-                "question": request.question,
-                "model": "gpt-4.1-mini",
-                "response_time_ms": response_time_ms,
-                "created_at": now_iso
-            }).execute()
+            insert_usage_event(
+                user_id=request.user_id,
+                conversation_id=request.conversation_id,
+                filename=selected_filename,
+                question=request.question,
+                model="gpt-4.1-mini",
+                response_time_ms=response_time_ms,
+                now_iso=now_iso
+            )
 
-            yield f"data: {json.dumps({'done': True, 'title': new_title, 'response_time_ms': response_time_ms})}\n\n"
+            yield f"data: {json.dumps({
+                'done': True,
+                'title': new_title,
+                'response_time_ms': response_time_ms,
+                'retrieved_count': len(matched_chunks),
+                'reranked_count': len(reranked_chunks),
+                'reranker_model': RERANKER_MODEL
+            })}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
