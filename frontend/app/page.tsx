@@ -121,11 +121,15 @@ export default function Home() {
       const data = await res.json();
 
       if (res.ok) {
-        setDocuments(Array.isArray(data) ? data : []);
+        const docs = Array.isArray(data) ? data : [];
+        setDocuments(docs);
+        return docs;
       }
     } catch (error) {
       console.error("Failed to fetch documents:", error);
     }
+
+    return [];
   };
 
   const fetchHistory = async (conversationId: string) => {
@@ -137,9 +141,12 @@ export default function Home() {
 
       if (res.ok) {
         setHistory(Array.isArray(data) ? data : []);
+      } else {
+        setHistory([]);
       }
     } catch (error) {
       console.error("Failed to fetch history:", error);
+      setHistory([]);
     }
   };
 
@@ -149,7 +156,7 @@ export default function Home() {
     preferredConversationId?: string,
     search?: string
   ) => {
-    if (!user?.id) return;
+    if (!user?.id) return [];
 
     try {
       const params = new URLSearchParams();
@@ -162,7 +169,7 @@ export default function Home() {
       const res = await fetch(url);
       const data = await res.json();
 
-      if (!res.ok) return;
+      if (!res.ok) return [];
 
       const convos = Array.isArray(data) ? data : [];
       setConversations(convos);
@@ -170,7 +177,7 @@ export default function Home() {
       if (convos.length === 0) {
         setActiveConversationId("");
         setHistory([]);
-        return;
+        return [];
       }
 
       if (preferredConversationId) {
@@ -179,14 +186,14 @@ export default function Home() {
           setActiveConversationId(preferred.id);
           setSelectedDocument(preferred.filename || filename || "");
           await fetchHistory(preferred.id);
-          return;
+          return convos;
         }
       }
 
       if (preserveActive && activeConversationId) {
         const existing = convos.find((c) => c.id === activeConversationId);
         if (existing) {
-          return;
+          return convos;
         }
       }
 
@@ -196,8 +203,11 @@ export default function Home() {
         setSelectedDocument(first.filename || filename || "");
         await fetchHistory(first.id);
       }
+
+      return convos;
     } catch (error) {
       console.error("Failed to fetch conversations:", error);
+      return [];
     }
   };
 
@@ -213,8 +223,16 @@ export default function Home() {
     }
 
     if (isSignedIn && user?.id) {
-      fetchDocuments();
-      fetchConversations();
+      const init = async () => {
+        const docs = await fetchDocuments();
+        const convos = await fetchConversations();
+
+        if ((!convos || convos.length === 0) && docs && docs.length > 0) {
+          setSelectedDocument(docs[0].filename);
+        }
+      };
+
+      init();
     }
   }, [isSignedIn, user?.id]);
 
@@ -265,7 +283,10 @@ export default function Home() {
 
         setActiveConversationId(newConversation.id);
         setSelectedDocument(newConversation.filename || filename || "");
-        setConversations((prev) => [newConversation, ...prev]);
+        setConversations((prev) => {
+          const exists = prev.some((c) => c.id === newConversation.id);
+          return exists ? prev : [newConversation, ...prev];
+        });
         setHistory([]);
         setQuestion("");
         setAnswer("");
@@ -329,7 +350,11 @@ export default function Home() {
 
       await fetchDocuments();
       setSelectedDocument(uploadedFilename);
-      await createNewConversation(uploadedFilename);
+
+      const convos = await fetchConversations(uploadedFilename, false, undefined, searchText || undefined);
+      if (!convos || convos.length === 0) {
+        await createNewConversation(uploadedFilename);
+      }
     } catch (error) {
       console.error("Upload failed:", error);
       setMessage("Upload failed");
@@ -473,7 +498,6 @@ export default function Home() {
       } else {
         setActiveConversationId("");
         setHistory([]);
-        await createNewConversation(filename);
       }
     } catch (error) {
       console.error("Failed to change document:", error);
@@ -486,10 +510,11 @@ export default function Home() {
       return;
     }
 
-    setHistory([]);
     setQuestion("");
     setAnswer("");
     setDisplayedAnswer("");
+    setShareLink("");
+    setHistory([]);
 
     await createNewConversation(selectedDocument);
   };
@@ -581,7 +606,9 @@ export default function Home() {
     if (!confirmed) return;
 
     try {
-      const encodedFilename = encodeURIComponent(selectedDocument);
+      const deletedDocument = selectedDocument;
+      const encodedFilename = encodeURIComponent(deletedDocument);
+
       const res = await fetch(
         `${BACKEND_URL}/documents/${user.id}/${encodedFilename}`,
         {
@@ -590,8 +617,6 @@ export default function Home() {
       );
 
       if (res.ok) {
-        const deletedDocument = selectedDocument;
-
         setActiveConversationId("");
         setHistory([]);
         setQuestion("");
@@ -599,17 +624,17 @@ export default function Home() {
         setDisplayedAnswer("");
         setShareLink("");
 
-        await fetchDocuments();
-
-        const remainingDocs = sortedDocuments.filter(
-          (d) => d.filename !== deletedDocument
+        const docs = await fetchDocuments();
+        const remainingDocs = (docs || []).filter(
+          (d: DocumentItem) => d.filename !== deletedDocument
         );
-        const nextDoc = remainingDocs[0]?.filename || "";
-        setSelectedDocument(nextDoc);
 
-        if (nextDoc) {
-          await fetchConversations(nextDoc, false, undefined, searchText || undefined);
+        if (remainingDocs.length > 0) {
+          const nextDoc = remainingDocs[0].filename;
+          setSelectedDocument(nextDoc);
+          await handleDocumentChange(nextDoc);
         } else {
+          setSelectedDocument("");
           setConversations([]);
           setHistory([]);
         }
@@ -756,14 +781,17 @@ export default function Home() {
                   {sortedDocuments.length === 0 ? (
                     <option value="">No documents uploaded</option>
                   ) : (
-                    sortedDocuments.map((doc, index) => (
-                      <option
-                        key={doc.id || `${doc.filename}-${index}`}
-                        value={doc.filename}
-                      >
-                        {doc.filename}
-                      </option>
-                    ))
+                    <>
+                      <option value="">Select a document</option>
+                      {sortedDocuments.map((doc, index) => (
+                        <option
+                          key={doc.id || `${doc.filename}-${index}`}
+                          value={doc.filename}
+                        >
+                          {doc.filename}
+                        </option>
+                      ))}
+                    </>
                   )}
                 </select>
 
@@ -802,9 +830,13 @@ export default function Home() {
               </div>
 
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {sortedConversations.length === 0 ? (
+                {selectedDocument && sortedConversations.length === 0 ? (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
                     No chats for this document yet
+                  </div>
+                ) : !selectedDocument ? (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
+                    Select a document to view chats
                   </div>
                 ) : (
                   sortedConversations.map((conversation) => (
@@ -955,9 +987,11 @@ export default function Home() {
                       Ask your document anything
                     </h2>
                     <p className="text-gray-500">
-                      {activeConversationId
-                        ? "This conversation is empty. Ask your first question."
-                        : "Pick a document from the dropdown or start a new chat."}
+                      {selectedDocument
+                        ? activeConversationId
+                          ? "This conversation is empty. Ask your first question."
+                          : "No chat selected. Click New chat to start fresh, or select an existing chat."
+                        : "Pick a document from the dropdown to view its previous chats."}
                     </p>
                   </div>
                 )}
@@ -1044,11 +1078,7 @@ export default function Home() {
 
                     <button
                       onClick={handleAsk}
-                      disabled={
-                        loading ||
-                        !question.trim() ||
-                        !selectedDocument
-                      }
+                      disabled={loading || !question.trim() || !selectedDocument}
                       className="rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {loading ? "Thinking..." : "Send"}
