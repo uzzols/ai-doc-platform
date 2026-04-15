@@ -243,7 +243,7 @@ export default function Home() {
   }, [answer]);
 
   const createNewConversation = async (filename?: string) => {
-    if (!user?.id) return;
+    if (!user?.id) return null;
 
     try {
       const res = await fetch(`${BACKEND_URL}/conversations`, {
@@ -261,7 +261,7 @@ export default function Home() {
       const data = await res.json();
 
       if (res.ok && data?.id) {
-        const newConversation = data;
+        const newConversation = data as ConversationItem;
 
         setActiveConversationId(newConversation.id);
         setSelectedDocument(newConversation.filename || filename || "");
@@ -282,10 +282,14 @@ export default function Home() {
         setTimeout(() => {
           inputRef.current?.focus();
         }, 100);
+
+        return newConversation;
       }
     } catch (error) {
       console.error("Failed to create conversation:", error);
     }
+
+    return null;
   };
 
   const handleUpload = async () => {
@@ -338,14 +342,20 @@ export default function Home() {
     if (!question.trim() || loading) return;
     if (!user?.id) return;
 
-    if (!activeConversationId) {
-      setAnswer("Please start or select a conversation first.");
-      return;
-    }
-
     if (!selectedDocument) {
       setAnswer("Please select a document first.");
       return;
+    }
+
+    let conversationId = activeConversationId;
+
+    if (!conversationId) {
+      const createdConversation = await createNewConversation(selectedDocument);
+      if (!createdConversation?.id) {
+        setAnswer("Failed to create a new conversation.");
+        return;
+      }
+      conversationId = createdConversation.id;
     }
 
     const currentQuestion = question.trim();
@@ -372,7 +382,7 @@ export default function Home() {
         body: JSON.stringify({
           question: currentQuestion,
           user_id: user.id,
-          conversation_id: activeConversationId,
+          conversation_id: conversationId,
           filename: selectedDocument,
         }),
       });
@@ -399,8 +409,13 @@ export default function Home() {
         )
       );
 
-      await fetchHistory(activeConversationId);
-      await fetchConversations(selectedDocument, true, activeConversationId, searchText || undefined);
+      await fetchHistory(conversationId);
+      await fetchConversations(
+        selectedDocument,
+        true,
+        conversationId,
+        searchText || undefined
+      );
     } catch (error) {
       console.error("Error getting response:", error);
       const errorMessage = "Error getting response";
@@ -433,7 +448,36 @@ export default function Home() {
     setAnswer("");
     setDisplayedAnswer("");
     setShareLink("");
-    await fetchConversations(filename, false, undefined, searchText || undefined);
+
+    if (!user?.id) return;
+
+    try {
+      const params = new URLSearchParams();
+      params.set("filename", filename);
+      if (searchText) params.set("search", searchText);
+
+      const res = await fetch(
+        `${BACKEND_URL}/conversations/${user.id}?${params.toString()}`
+      );
+      const data = await res.json();
+
+      if (!res.ok) return;
+
+      const convos = Array.isArray(data) ? data : [];
+      setConversations(convos);
+
+      if (convos.length > 0) {
+        const first = convos[0];
+        setActiveConversationId(first.id);
+        await fetchHistory(first.id);
+      } else {
+        setActiveConversationId("");
+        setHistory([]);
+        await createNewConversation(filename);
+      }
+    } catch (error) {
+      console.error("Failed to change document:", error);
+    }
   };
 
   const handleNewChat = async () => {
@@ -465,7 +509,12 @@ export default function Home() {
         setShareLink("");
       }
 
-      await fetchConversations(selectedDocument || undefined, false, undefined, searchText || undefined);
+      await fetchConversations(
+        selectedDocument || undefined,
+        false,
+        undefined,
+        searchText || undefined
+      );
     } catch (error) {
       console.error("Failed to delete conversation:", error);
     }
@@ -487,7 +536,12 @@ export default function Home() {
       if (res.ok) {
         setRenamingConversationId("");
         setRenameValue("");
-        await fetchConversations(selectedDocument || undefined, true, activeConversationId, searchText || undefined);
+        await fetchConversations(
+          selectedDocument || undefined,
+          true,
+          activeConversationId,
+          searchText || undefined
+        );
       }
     } catch (error) {
       console.error("Failed to rename conversation:", error);
@@ -528,11 +582,16 @@ export default function Home() {
 
     try {
       const encodedFilename = encodeURIComponent(selectedDocument);
-      const res = await fetch(`${BACKEND_URL}/documents/${user.id}/${encodedFilename}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(
+        `${BACKEND_URL}/documents/${user.id}/${encodedFilename}`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (res.ok) {
+        const deletedDocument = selectedDocument;
+
         setActiveConversationId("");
         setHistory([]);
         setQuestion("");
@@ -542,7 +601,9 @@ export default function Home() {
 
         await fetchDocuments();
 
-        const remainingDocs = sortedDocuments.filter((d) => d.filename !== selectedDocument);
+        const remainingDocs = sortedDocuments.filter(
+          (d) => d.filename !== deletedDocument
+        );
         const nextDoc = remainingDocs[0]?.filename || "";
         setSelectedDocument(nextDoc);
 
@@ -983,7 +1044,11 @@ export default function Home() {
 
                     <button
                       onClick={handleAsk}
-                      disabled={loading || !question.trim() || !selectedDocument || !activeConversationId}
+                      disabled={
+                        loading ||
+                        !question.trim() ||
+                        !selectedDocument
+                      }
                       className="rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {loading ? "Thinking..." : "Send"}
