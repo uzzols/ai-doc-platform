@@ -699,14 +699,16 @@ Question:
                 now_iso=now_iso
             )
 
-            yield f"data: {json.dumps({
-                'done': True,
-                'title': new_title,
-                'response_time_ms': response_time_ms,
-                'retrieved_count': len(matched_chunks),
-                'reranked_count': len(reranked_chunks),
-                'reranker_model': RERANKER_MODEL
-            })}\n\n"
+          payload = {
+             "done": True,
+             "title": new_title,
+             "response_time_ms": response_time_ms,
+             "retrieved_count": len(matched_chunks),
+             "reranked_count": len(reranked_chunks),
+             "reranker_model": RERANKER_MODEL
+         }
+
+        yield f"data: {json.dumps(payload)}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
