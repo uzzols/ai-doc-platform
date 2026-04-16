@@ -224,6 +224,11 @@ Return valid JSON only.
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=f"""
+Return ONLY valid JSON.
+Do NOT include markdown fences.
+Do NOT include explanations.
+Do NOT include text before or after the JSON object.
+
 {instruction}
 
 Document text:
@@ -233,14 +238,13 @@ Document text:
 
     raw = response.output_text.strip()
 
-# Remove markdown ```json ``` if present
-if raw.startswith("```"):
-    raw = raw.replace("```json", "").replace("```", "").strip()
+    if raw.startswith("```"):
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
-try:
-    return json.loads(raw)
-except Exception:
-    return {"raw_extraction": raw}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"raw_extraction": raw}
 
 
 def get_relevant_chunks(
