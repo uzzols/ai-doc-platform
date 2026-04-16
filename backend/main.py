@@ -233,10 +233,14 @@ Document text:
 
     raw = response.output_text.strip()
 
-    try:
-        return json.loads(raw)
-    except Exception:
-        return {"raw_extraction": raw}
+# Remove markdown ```json ``` if present
+if raw.startswith("```"):
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+try:
+    return json.loads(raw)
+except Exception:
+    return {"raw_extraction": raw}
 
 
 def get_relevant_chunks(
