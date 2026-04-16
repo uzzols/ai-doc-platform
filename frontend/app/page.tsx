@@ -17,6 +17,8 @@ type DocumentItem = {
   filename: string;
   file_type?: string;
   uploaded_at?: string;
+  document_type?: string | null;
+  extracted_data?: Record<string, any> | null;
 };
 
 type ConversationItem = {
@@ -37,6 +39,28 @@ function LoadingDots() {
       <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
     </div>
   );
+}
+
+function formatFieldLabel(key: string) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function renderFieldValue(value: any) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+
+  return String(value);
 }
 
 export default function Home() {
@@ -93,6 +117,17 @@ export default function Home() {
     });
   }, [conversations]);
 
+  const selectedDocumentMeta = useMemo(() => {
+    return documents.find((doc) => doc.filename === selectedDocument) || null;
+  }, [documents, selectedDocument]);
+
+  const extractedEntries = useMemo(() => {
+    if (!selectedDocumentMeta?.extracted_data || typeof selectedDocumentMeta.extracted_data !== "object") {
+      return [];
+    }
+    return Object.entries(selectedDocumentMeta.extracted_data);
+  }, [selectedDocumentMeta]);
+
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -114,7 +149,7 @@ export default function Home() {
   };
 
   const fetchDocuments = async () => {
-    if (!user?.id) return;
+    if (!user?.id) return [];
 
     try {
       const res = await fetch(`${BACKEND_URL}/documents/${user.id}`);
@@ -192,9 +227,7 @@ export default function Home() {
 
       if (preserveActive && activeConversationId) {
         const existing = convos.find((c) => c.id === activeConversationId);
-        if (existing) {
-          return convos;
-        }
+        if (existing) return convos;
       }
 
       if (!activeConversationId || !preserveActive) {
@@ -310,7 +343,7 @@ export default function Home() {
 
     try {
       setUploading(true);
-      setMessage("");
+      setMessage("Uploading, classifying, extracting, and indexing document...");
 
       const res = await fetch(`${BACKEND_URL}/upload`, {
         method: "POST",
@@ -834,6 +867,45 @@ export default function Home() {
                     Delete document
                   </button>
                 </div>
+              </div>
+
+              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 text-sm font-medium text-gray-800">Document Insights</div>
+
+                {!selectedDocumentMeta ? (
+                  <p className="text-xs text-gray-500">Select a document to see insights.</p>
+                ) : (
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <div className="font-medium text-gray-700">Document Type</div>
+                      <div className="mt-1 rounded-lg bg-white border border-gray-200 px-3 py-2 text-gray-900">
+                        {selectedDocumentMeta.document_type || "Not available"}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="font-medium text-gray-700">Extracted Data</div>
+                      <div className="mt-1 rounded-lg bg-white border border-gray-200 p-3">
+                        {extractedEntries.length === 0 ? (
+                          <div className="text-gray-500">No extracted fields available.</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {extractedEntries.map(([key, value]) => (
+                              <div key={key} className="border-b border-gray-100 pb-2 last:border-b-0 last:pb-0">
+                                <div className="font-medium text-gray-700">
+                                  {formatFieldLabel(key)}
+                                </div>
+                                <div className="mt-1 whitespace-pre-wrap text-gray-900">
+                                  {renderFieldValue(value)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mb-3">
