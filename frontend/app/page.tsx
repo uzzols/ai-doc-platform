@@ -114,7 +114,10 @@ export default function Home() {
   }, [documents, selectedDocument]);
 
   const extractedEntries = useMemo(() => {
-    if (!selectedDocumentMeta?.extracted_data || typeof selectedDocumentMeta.extracted_data !== "object") {
+    if (
+      !selectedDocumentMeta?.extracted_data ||
+      typeof selectedDocumentMeta.extracted_data !== "object"
+    ) {
       return [];
     }
     return Object.entries(selectedDocumentMeta.extracted_data);
@@ -178,16 +181,14 @@ export default function Home() {
   };
 
   const fetchConversations = async (
-    filename?: string,
+    search?: string,
     preserveActive = true,
-    preferredConversationId?: string,
-    search?: string
+    preferredConversationId?: string
   ) => {
     if (!user?.id) return [];
 
     try {
       const params = new URLSearchParams();
-      if (filename) params.set("filename", filename);
       if (search) params.set("search", search);
 
       const qs = params.toString();
@@ -211,7 +212,7 @@ export default function Home() {
         const preferred = convos.find((c) => c.id === preferredConversationId);
         if (preferred) {
           setActiveConversationId(preferred.id);
-          setSelectedDocument(preferred.filename || filename || "");
+          setSelectedDocument(preferred.filename || "");
           await fetchHistory(preferred.id);
           return convos;
         }
@@ -225,7 +226,7 @@ export default function Home() {
       if (!activeConversationId || !preserveActive) {
         const first = convos[0];
         setActiveConversationId(first.id);
-        setSelectedDocument(first.filename || filename || "");
+        setSelectedDocument(first.filename || "");
         await fetchHistory(first.id);
       }
 
@@ -298,12 +299,7 @@ export default function Home() {
         setDisplayedAnswer("");
         setShareLink("");
 
-        await fetchConversations(
-          newConversation.filename || filename || undefined,
-          true,
-          newConversation.id,
-          searchText || undefined
-        );
+        await fetchConversations(searchText || undefined, true, newConversation.id);
 
         setTimeout(() => {
           inputRef.current?.focus();
@@ -356,16 +352,15 @@ export default function Home() {
       await fetchDocuments();
       setSelectedDocument(uploadedFilename);
 
-      const convos = await fetchConversations(
-        uploadedFilename,
-        false,
-        undefined,
-        searchText || undefined
-      );
+      setQuestion("");
+      setAnswer("");
+      setDisplayedAnswer("");
+      setShareLink("");
 
-      if (!convos || convos.length === 0) {
-        await createNewConversation(uploadedFilename);
-      }
+      setActiveConversationId("");
+      setHistory([]);
+
+      await fetchConversations(searchText || undefined, true);
     } catch (error) {
       console.error("Upload failed:", error);
       setMessage("Upload failed");
@@ -481,12 +476,7 @@ export default function Home() {
 
               if (data.done) {
                 await fetchHistory(conversationId);
-                await fetchConversations(
-                  selectedDocument,
-                  true,
-                  conversationId,
-                  searchText || undefined
-                );
+                await fetchConversations(searchText || undefined, true, conversationId);
               }
             } catch (e) {
               console.error("Stream parse error:", e);
@@ -529,33 +519,21 @@ export default function Home() {
     setDisplayedAnswer("");
     setShareLink("");
 
-    if (!user?.id) return;
+    if (!filename) {
+      setShowInsights(false);
+      return;
+    }
 
-    try {
-      const params = new URLSearchParams();
-      params.set("filename", filename);
-      if (searchText) params.set("search", searchText);
+    const matchingConversation = sortedConversations.find(
+      (conversation) => conversation.filename === filename
+    );
 
-      const res = await fetch(
-        `${BACKEND_URL}/conversations/${user.id}?${params.toString()}`
-      );
-      const data = await res.json();
-
-      if (!res.ok) return;
-
-      const convos = Array.isArray(data) ? data : [];
-      setConversations(convos);
-
-      if (convos.length > 0) {
-        const first = convos[0];
-        setActiveConversationId(first.id);
-        await fetchHistory(first.id);
-      } else {
-        setActiveConversationId("");
-        setHistory([]);
-      }
-    } catch (error) {
-      console.error("Failed to change document:", error);
+    if (matchingConversation) {
+      setActiveConversationId(matchingConversation.id);
+      await fetchHistory(matchingConversation.id);
+    } else {
+      setActiveConversationId("");
+      setHistory([]);
     }
   };
 
@@ -589,12 +567,21 @@ export default function Home() {
         setShareLink("");
       }
 
-      await fetchConversations(
-        selectedDocument || undefined,
+      const updatedConvos = await fetchConversations(
+        searchText || undefined,
         false,
-        undefined,
-        searchText || undefined
+        undefined
       );
+
+      if (updatedConvos.length > 0) {
+        const first = updatedConvos[0];
+        setActiveConversationId(first.id);
+        setSelectedDocument(first.filename || selectedDocument || "");
+        await fetchHistory(first.id);
+      } else {
+        setActiveConversationId("");
+        setHistory([]);
+      }
     } catch (error) {
       console.error("Failed to delete conversation:", error);
     }
@@ -616,12 +603,7 @@ export default function Home() {
       if (res.ok) {
         setRenamingConversationId("");
         setRenameValue("");
-        await fetchConversations(
-          selectedDocument || undefined,
-          true,
-          activeConversationId,
-          searchText || undefined
-        );
+        await fetchConversations(searchText || undefined, true, activeConversationId);
       }
     } catch (error) {
       console.error("Failed to rename conversation:", error);
@@ -630,9 +612,12 @@ export default function Home() {
 
   const handleShareConversation = async (conversationId: string) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/conversations/${conversationId}/share`, {
-        method: "POST",
-      });
+      const res = await fetch(
+        `${BACKEND_URL}/conversations/${conversationId}/share`,
+        {
+          method: "POST",
+        }
+      );
       const data = await res.json();
 
       if (res.ok && data?.share_path) {
@@ -684,10 +669,10 @@ export default function Home() {
           (d: DocumentItem) => d.filename !== deletedDocument
         );
 
+        await fetchConversations(searchText || undefined, false);
+
         if (remainingDocs.length > 0) {
-          const nextDoc = remainingDocs[0].filename;
-          setSelectedDocument(nextDoc);
-          await handleDocumentChange(nextDoc);
+          setSelectedDocument(remainingDocs[0].filename);
         } else {
           setSelectedDocument("");
           setConversations([]);
@@ -826,7 +811,7 @@ export default function Home() {
 
               <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <label className="mb-2 block text-sm font-medium text-gray-800">
-                  Uploaded document
+                  Current document for new chat
                 </label>
                 <select
                   value={selectedDocument}
@@ -869,29 +854,18 @@ export default function Home() {
                   onChange={async (e) => {
                     const value = e.target.value;
                     setSearchText(value);
-                    await fetchConversations(
-                      selectedDocument || undefined,
-                      false,
-                      undefined,
-                      value || undefined
-                    );
+                    await fetchConversations(value || undefined, false);
                   }}
                   className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-sm text-gray-900 outline-none"
                 />
               </div>
 
-              <div className="mb-2 text-sm font-medium text-gray-800">
-                Chats for selected document
-              </div>
+              <div className="mb-2 text-sm font-medium text-gray-800">All chats</div>
 
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {selectedDocument && sortedConversations.length === 0 ? (
+                {sortedConversations.length === 0 ? (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
-                    No chats for this document yet
-                  </div>
-                ) : !selectedDocument ? (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
-                    Select a document to view chats
+                    No chats yet
                   </div>
                 ) : (
                   sortedConversations.map((conversation) => (
@@ -1004,7 +978,9 @@ export default function Home() {
                 {showInsights && (
                   <div className="mt-3">
                     {!selectedDocumentMeta ? (
-                      <p className="text-xs text-gray-500">Select a document to see insights.</p>
+                      <p className="text-xs text-gray-500">
+                        Select a document to see insights.
+                      </p>
                     ) : (
                       <div className="space-y-3 text-xs">
                         <div>
@@ -1018,7 +994,9 @@ export default function Home() {
                           <div className="font-medium text-gray-700">Extracted Data</div>
                           <div className="mt-1 rounded-lg border border-gray-200 bg-white p-3">
                             {extractedEntries.length === 0 ? (
-                              <div className="text-gray-500">No extracted fields available.</div>
+                              <div className="text-gray-500">
+                                No extracted fields available.
+                              </div>
                             ) : (
                               <div className="space-y-2">
                                 {extractedEntries.map(([key, value]) => (
@@ -1084,7 +1062,9 @@ export default function Home() {
                 {shareLink && (
                   <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
                     Share link copied:
-                    <div className="mt-2 break-all text-xs text-gray-500">{shareLink}</div>
+                    <div className="mt-2 break-all text-xs text-gray-500">
+                      {shareLink}
+                    </div>
                   </div>
                 )}
 
@@ -1097,8 +1077,8 @@ export default function Home() {
                       {selectedDocument
                         ? activeConversationId
                           ? "This conversation is empty. Ask your first question."
-                          : "No chat selected. Click New chat to start fresh, or select an existing chat."
-                        : "Pick a document from the dropdown to view its previous chats."}
+                          : "Choose New chat to start with the selected document, or open any previous chat from the sidebar."
+                        : "Select a document for a new chat, or open a previous chat from the sidebar."}
                     </p>
                   </div>
                 )}
