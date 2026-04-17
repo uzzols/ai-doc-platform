@@ -12,13 +12,64 @@ type ChatItem = {
   filename?: string | null;
 };
 
+type SheetKpiCard = {
+  label: string;
+  value: string | number;
+};
+
+type SheetPreview = {
+  sheet_name: string;
+  columns: string[];
+  rows: Record<string, any>[];
+  kpis?: {
+    cards?: SheetKpiCard[];
+    numeric_summaries?: Array<{
+      column: string;
+      count: number;
+      sum: number;
+      average: number;
+      min: number;
+      max: number;
+    }>;
+    date_summary?: Array<{
+      column: string;
+      min: string;
+      max: string;
+    }>;
+    column_profiles?: Array<{
+      column: string;
+      dtype: string;
+      non_null: number;
+      nulls: number;
+      unique: number;
+    }>;
+  };
+};
+
 type DocumentItem = {
   id?: string;
   filename: string;
   file_type?: string;
   uploaded_at?: string;
   document_type?: string | null;
-  extracted_data?: Record<string, any> | null;
+  public_url?: string | null;
+  storage_path?: string | null;
+  extracted_data?: {
+    preview?: {
+      kind?: string;
+      sheets?: SheetPreview[];
+      workbook_kpis?: {
+        cards?: SheetKpiCard[];
+      };
+      summary?: string;
+      visible_text?: string;
+      labels?: string[];
+      numbers?: string[];
+      table_like_content?: string;
+    };
+    structured_fields?: Record<string, any> | null;
+    [key: string]: any;
+  } | null;
 };
 
 type ConversationItem = {
@@ -54,6 +105,14 @@ function renderFieldValue(value: any) {
   return String(value);
 }
 
+function isSpreadsheetFile(fileType?: string | null) {
+  return fileType === "csv" || fileType === "xlsx";
+}
+
+function isImageFile(fileType?: string | null) {
+  return fileType === "image";
+}
+
 export default function Home() {
   const { isSignedIn, user } = useUser();
 
@@ -71,6 +130,7 @@ export default function Home() {
   const [sharedView, setSharedView] = useState(false);
   const [sharedTitle, setSharedTitle] = useState("");
   const [showInsights, setShowInsights] = useState(false);
+  const [selectedSheetIndex, setSelectedSheetIndex] = useState(0);
 
   const [history, setHistory] = useState<ChatItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -113,14 +173,19 @@ export default function Home() {
     return documents.find((doc) => doc.filename === selectedDocument) || null;
   }, [documents, selectedDocument]);
 
-  const extractedEntries = useMemo(() => {
-    if (
-      !selectedDocumentMeta?.extracted_data ||
-      typeof selectedDocumentMeta.extracted_data !== "object"
-    ) {
-      return [];
-    }
-    return Object.entries(selectedDocumentMeta.extracted_data);
+  const spreadsheetSheets = useMemo(() => {
+    return selectedDocumentMeta?.extracted_data?.preview?.sheets || [];
+  }, [selectedDocumentMeta]);
+
+  const selectedSheet = useMemo(() => {
+    if (spreadsheetSheets.length === 0) return null;
+    return spreadsheetSheets[selectedSheetIndex] || spreadsheetSheets[0];
+  }, [spreadsheetSheets, selectedSheetIndex]);
+
+  const structuredEntries = useMemo(() => {
+    const structured = selectedDocumentMeta?.extracted_data?.structured_fields;
+    if (!structured || typeof structured !== "object") return [];
+    return Object.entries(structured);
   }, [selectedDocumentMeta]);
 
   const scrollToBottom = () => {
@@ -266,6 +331,10 @@ export default function Home() {
     scrollToBottom();
   }, [sortedHistory, displayedAnswer, loading]);
 
+  useEffect(() => {
+    setSelectedSheetIndex(0);
+  }, [selectedDocument]);
+
   const createNewConversation = async (filename?: string) => {
     if (!user?.id) return null;
 
@@ -331,7 +400,7 @@ export default function Home() {
 
     try {
       setUploading(true);
-      setMessage("Uploading, classifying, extracting, and indexing document...");
+      setMessage("Uploading, classifying, extracting, indexing, and building preview...");
 
       const res = await fetch(`${BACKEND_URL}/upload`, {
         method: "POST",
@@ -518,6 +587,7 @@ export default function Home() {
     setAnswer("");
     setDisplayedAnswer("");
     setShareLink("");
+    setSelectedSheetIndex(0);
 
     if (!filename) {
       setShowInsights(false);
@@ -766,7 +836,7 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="flex w-[320px] flex-col border-r border-gray-200 bg-white p-3">
+            <aside className="flex w-[340px] flex-col border-r border-gray-200 bg-white p-3">
               <div className="mb-3">
                 <button
                   onClick={handleNewChat}
@@ -781,7 +851,7 @@ export default function Home() {
 
                 <input
                   type="file"
-                  accept=".pdf,.csv,.txt,.docx"
+                  accept=".pdf,.csv,.txt,.docx,.xlsx,.png,.jpg,.jpeg,.webp"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                   className="mb-3 w-full text-xs text-gray-700"
                 />
@@ -982,7 +1052,7 @@ export default function Home() {
                         Select a document to see insights.
                       </p>
                     ) : (
-                      <div className="space-y-3 text-xs">
+                      <div className="space-y-4 text-xs">
                         <div>
                           <div className="font-medium text-gray-700">Document Type</div>
                           <div className="mt-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900">
@@ -990,16 +1060,201 @@ export default function Home() {
                           </div>
                         </div>
 
-                        <div>
-                          <div className="font-medium text-gray-700">Extracted Data</div>
-                          <div className="mt-1 rounded-lg border border-gray-200 bg-white p-3">
-                            {extractedEntries.length === 0 ? (
-                              <div className="text-gray-500">
-                                No extracted fields available.
+                        {isImageFile(selectedDocumentMeta.file_type) &&
+                          selectedDocumentMeta.public_url && (
+                            <div>
+                              <div className="font-medium text-gray-700">Image Preview</div>
+                              <div className="mt-2 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                <img
+                                  src={selectedDocumentMeta.public_url}
+                                  alt={selectedDocumentMeta.filename}
+                                  className="h-auto w-full object-contain"
+                                />
                               </div>
+                            </div>
+                          )}
+
+                        {isImageFile(selectedDocumentMeta.file_type) &&
+                          selectedDocumentMeta.extracted_data?.preview && (
+                            <div>
+                              <div className="font-medium text-gray-700">Image Analysis</div>
+                              <div className="mt-2 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
+                                <div>
+                                  <span className="font-semibold">Summary:</span>{" "}
+                                  {selectedDocumentMeta.extracted_data.preview.summary || "—"}
+                                </div>
+                                <div>
+                                  <span className="font-semibold">Visible Text:</span>{" "}
+                                  {selectedDocumentMeta.extracted_data.preview.visible_text || "—"}
+                                </div>
+                                <div>
+                                  <span className="font-semibold">Labels:</span>{" "}
+                                  {selectedDocumentMeta.extracted_data.preview.labels?.join(", ") || "—"}
+                                </div>
+                                <div>
+                                  <span className="font-semibold">Numbers:</span>{" "}
+                                  {selectedDocumentMeta.extracted_data.preview.numbers?.join(", ") || "—"}
+                                </div>
+                                <div>
+                                  <span className="font-semibold">Table-like Content:</span>{" "}
+                                  {selectedDocumentMeta.extracted_data.preview.table_like_content || "—"}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                        {isSpreadsheetFile(selectedDocumentMeta.file_type) &&
+                          spreadsheetSheets.length > 0 && (
+                            <div className="space-y-3">
+                              <div className="font-medium text-gray-700">Workbook KPIs</div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                {selectedDocumentMeta.extracted_data?.preview?.workbook_kpis?.cards?.map(
+                                  (card, index) => (
+                                    <div
+                                      key={`${card.label}-${index}`}
+                                      className="rounded-lg border border-gray-200 bg-white p-3"
+                                    >
+                                      <div className="text-[11px] text-gray-500">{card.label}</div>
+                                      <div className="mt-1 text-sm font-semibold text-gray-900">
+                                        {card.value}
+                                      </div>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+
+                              <div>
+                                <div className="mb-2 font-medium text-gray-700">Sheets</div>
+                                <div className="flex flex-wrap gap-2">
+                                  {spreadsheetSheets.map((sheet, index) => (
+                                    <button
+                                      key={`${sheet.sheet_name}-${index}`}
+                                      onClick={() => setSelectedSheetIndex(index)}
+                                      className={`rounded-full px-3 py-1 text-[11px] ${
+                                        selectedSheetIndex === index
+                                          ? "bg-black text-white"
+                                          : "border border-gray-200 bg-white text-gray-700"
+                                      }`}
+                                    >
+                                      {sheet.sheet_name}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {selectedSheet && (
+                                <>
+                                  <div>
+                                    <div className="mb-2 font-medium text-gray-700">
+                                      Sheet KPI Cards
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {selectedSheet.kpis?.cards?.map((card, index) => (
+                                        <div
+                                          key={`${card.label}-${index}`}
+                                          className="rounded-lg border border-gray-200 bg-white p-3"
+                                        >
+                                          <div className="text-[11px] text-gray-500">
+                                            {card.label}
+                                          </div>
+                                          <div className="mt-1 text-sm font-semibold text-gray-900">
+                                            {card.value}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="mb-2 font-medium text-gray-700">
+                                      Sheet Preview
+                                    </div>
+                                    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                                      <table className="min-w-full text-left text-xs">
+                                        <thead className="bg-gray-50">
+                                          <tr>
+                                            {selectedSheet.columns.map((col) => (
+                                              <th
+                                                key={col}
+                                                className="border-b border-gray-200 px-3 py-2 font-medium text-gray-700"
+                                              >
+                                                {col}
+                                              </th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {selectedSheet.rows.map((row, rowIndex) => (
+                                            <tr key={rowIndex} className="border-b border-gray-100 last:border-b-0">
+                                              {selectedSheet.columns.map((col) => (
+                                                <td key={`${rowIndex}-${col}`} className="px-3 py-2 text-gray-900">
+                                                  {row[col] === null || row[col] === undefined || row[col] === ""
+                                                    ? "—"
+                                                    : String(row[col])}
+                                                </td>
+                                              ))}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+
+                                  {!!selectedSheet.kpis?.numeric_summaries?.length && (
+                                    <div>
+                                      <div className="mb-2 font-medium text-gray-700">
+                                        Numeric Summary
+                                      </div>
+                                      <div className="space-y-2">
+                                        {selectedSheet.kpis.numeric_summaries.map((item, index) => (
+                                          <div
+                                            key={`${item.column}-${index}`}
+                                            className="rounded-lg border border-gray-200 bg-white p-3"
+                                          >
+                                            <div className="font-medium text-gray-800">{item.column}</div>
+                                            <div className="mt-1 text-gray-600">
+                                              Count: {item.count} | Sum: {item.sum} | Avg: {item.average} | Min: {item.min} | Max: {item.max}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {!!selectedSheet.kpis?.column_profiles?.length && (
+                                    <div>
+                                      <div className="mb-2 font-medium text-gray-700">
+                                        Column Profiles
+                                      </div>
+                                      <div className="space-y-2">
+                                        {selectedSheet.kpis.column_profiles.map((item, index) => (
+                                          <div
+                                            key={`${item.column}-${index}`}
+                                            className="rounded-lg border border-gray-200 bg-white p-3"
+                                          >
+                                            <div className="font-medium text-gray-800">{item.column}</div>
+                                            <div className="mt-1 text-gray-600">
+                                              Type: {item.dtype} | Non-null: {item.non_null} | Nulls: {item.nulls} | Unique: {item.unique}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                        <div>
+                          <div className="font-medium text-gray-700">Structured Fields</div>
+                          <div className="mt-1 rounded-lg border border-gray-200 bg-white p-3">
+                            {structuredEntries.length === 0 ? (
+                              <div className="text-gray-500">No structured fields available.</div>
                             ) : (
                               <div className="space-y-2">
-                                {extractedEntries.map(([key, value]) => (
+                                {structuredEntries.map(([key, value]) => (
                                   <div
                                     key={key}
                                     className="border-b border-gray-100 pb-2 last:border-b-0 last:pb-0"
