@@ -10,11 +10,13 @@ import pandas as pd
 import io
 import fitz
 import os
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
 import uuid
 import time
 import json
+import base64
+import mimetypes
 
 load_dotenv()
 
@@ -24,6 +26,7 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "https://ai-doc-platform-zeta.vercel.ap
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "uploads")
 
 if not OPENAI_API_KEY:
     raise ValueError("Missing OPENAI_API_KEY")
@@ -80,18 +83,337 @@ def get_embedding(text: str) -> List[float]:
     return res.data[0].embedding
 
 
-def extract_file_text(filename: str, contents: bytes):
+def safe_json_value(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+
+    if isinstance(value, (datetime,)):
+        return value.isoformat()
+
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            return str(value)
+
+    return value
+
+
+def clean_preview_df(df: pd.DataFrame, max_rows: int = 25, max_cols: int = 12) -> pd.DataFrame:
+    preview = df.copy()
+
+    # Keep preview light
+    preview = preview.iloc[:max_rows, :max_cols]
+
+    # Convert column names to string
+    preview.columns = [str(col) for col in preview.columns]
+
+    # Convert datetime-like columns
+    for col in preview.columns:
+        try:
+            if pd.api.types.is_datetime64_any_dtype(preview[col]):
+                preview[col] = preview[col].astype(str)
+        except Exception:
+            pass
+
+    return preview
+
+
+def dataframe_to_preview_rows(df: pd.DataFrame, max_rows: int = 25, max_cols: int = 12) -> Dict[str, Any]:
+    preview = clean_preview_df(df, max_rows=max_rows, max_cols=max_cols)
+    rows = []
+
+    for _, row in preview.iterrows():
+        item = {}
+        for col in preview.columns:
+            item[str(col)] = safe_json_value(row[col])
+        rows.append(item)
+
+    return {
+        "columns": [str(c) for c in preview.columns],
+        "rows": rows
+    }
+
+
+def detect_interesting_numeric_columns(df: pd.DataFrame) -> List[str]:
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    preferred_keywords = ["amount", "total", "price", "cost", "sales", "revenue", "balance", "qty", "quantity", "count", "score", "loan", "income"]
+
+    ranked = []
+    for col in numeric_cols:
+        lower = str(col).lower()
+        score = 0
+        for keyword in preferred_keywords:
+            if keyword in lower:
+                score += 5
+        score += max(0, len(df[col].dropna()))
+        ranked.append((col, score))
+
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    return [col for col, _ in ranked[:6]]
+
+
+def infer_date_columns(df: pd.DataFrame) -> List[str]:
+    date_cols = []
+
+    for col in df.columns:
+        col_name = str(col).lower()
+        if any(keyword in col_name for keyword in ["date", "time", "month", "year"]):
+            date_cols.append(str(col))
+            continue
+
+        # Try parsing object columns carefully
+        try:
+            if df[col].dtype == "object":
+                sample = df[col].dropna().astype(str).head(10)
+                if len(sample) > 0:
+                    parsed = pd.to_datetime(sample, errors="coerce")
+                    if parsed.notna().sum() >= max(1, len(sample) // 2):
+                        date_cols.append(str(col))
+        except Exception:
+            pass
+
+    return list(dict.fromkeys(date_cols))[:4]
+
+
+def build_spreadsheet_kpis(df: pd.DataFrame) -> Dict[str, Any]:
+    total_rows = int(len(df))
+    total_columns = int(len(df.columns))
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    date_cols = infer_date_columns(df)
+
+    cards = [
+        {"label": "Total Rows", "value": total_rows},
+        {"label": "Total Columns", "value": total_columns},
+        {"label": "Numeric Columns", "value": len(numeric_cols)},
+        {"label": "Missing Cells", "value": int(df.isna().sum().sum())},
+    ]
+
+    # Add sums for interesting numeric columns
+    for col in detect_interesting_numeric_columns(df)[:4]:
+        series = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(series) == 0:
+            continue
+        cards.append({
+            "label": f"Sum of {col}",
+            "value": round(float(series.sum()), 2)
+        })
+        if len(cards) >= 8:
+            break
+
+    numeric_summaries = []
+    for col in detect_interesting_numeric_columns(df):
+        series = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(series) == 0:
+            continue
+        numeric_summaries.append({
+            "column": str(col),
+            "count": int(series.count()),
+            "sum": round(float(series.sum()), 2),
+            "average": round(float(series.mean()), 2),
+            "min": round(float(series.min()), 2),
+            "max": round(float(series.max()), 2),
+        })
+
+    column_profiles = []
+    for col in df.columns[:12]:
+        series = df[col]
+        column_profiles.append({
+            "column": str(col),
+            "dtype": str(series.dtype),
+            "non_null": int(series.notna().sum()),
+            "nulls": int(series.isna().sum()),
+            "unique": int(series.nunique(dropna=True))
+        })
+
+    date_summary = []
+    for col in date_cols:
+        try:
+            parsed = pd.to_datetime(df[col], errors="coerce").dropna()
+            if len(parsed) > 0:
+                date_summary.append({
+                    "column": str(col),
+                    "min": parsed.min().isoformat(),
+                    "max": parsed.max().isoformat()
+                })
+        except Exception:
+            continue
+
+    return {
+        "cards": cards,
+        "numeric_summaries": numeric_summaries[:6],
+        "date_summary": date_summary[:4],
+        "column_profiles": column_profiles
+    }
+
+
+def build_csv_or_excel_preview(filename: str, contents: bytes) -> Tuple[str, str, Dict[str, Any]]:
     filename_lower = filename.lower()
-    text = ""
-    file_type = ""
 
     if filename_lower.endswith(".csv"):
         try:
             df = pd.read_csv(io.StringIO(contents.decode("utf-8")))
         except Exception:
             df = pd.read_csv(io.StringIO(contents.decode("latin-1")))
+
+        preview = dataframe_to_preview_rows(df)
+        kpis = build_spreadsheet_kpis(df)
+
         text = df.to_csv(index=False)
-        file_type = "csv"
+
+        extracted_data = {
+            "preview": {
+                "kind": "spreadsheet",
+                "sheets": [
+                    {
+                        "sheet_name": "CSV",
+                        "columns": preview["columns"],
+                        "rows": preview["rows"],
+                        "kpis": kpis
+                    }
+                ],
+                "workbook_kpis": kpis
+            }
+        }
+
+        return text, "csv", extracted_data
+
+    # Excel
+    excel_file = pd.ExcelFile(io.BytesIO(contents))
+    all_sheet_text = []
+    sheets_preview = []
+    workbook_cards = []
+    total_rows_all = 0
+    total_columns_max = 0
+
+    for sheet_name in excel_file.sheet_names:
+        df = excel_file.parse(sheet_name=sheet_name)
+        total_rows_all += len(df)
+        total_columns_max = max(total_columns_max, len(df.columns))
+
+        preview = dataframe_to_preview_rows(df)
+        kpis = build_spreadsheet_kpis(df)
+
+        sheets_preview.append({
+            "sheet_name": str(sheet_name),
+            "columns": preview["columns"],
+            "rows": preview["rows"],
+            "kpis": kpis
+        })
+
+        all_sheet_text.append(f"Sheet: {sheet_name}\n")
+        all_sheet_text.append(df.to_csv(index=False))
+
+    workbook_cards = [
+        {"label": "Sheets", "value": len(excel_file.sheet_names)},
+        {"label": "Total Rows", "value": int(total_rows_all)},
+        {"label": "Max Columns in Sheet", "value": int(total_columns_max)},
+    ]
+
+    extracted_data = {
+        "preview": {
+            "kind": "spreadsheet",
+            "sheets": sheets_preview,
+            "workbook_kpis": {
+                "cards": workbook_cards
+            }
+        }
+    }
+
+    return "\n\n".join(all_sheet_text), "xlsx", extracted_data
+
+
+def analyze_image_with_openai(filename: str, contents: bytes) -> Tuple[str, str, Dict[str, Any]]:
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        mime_type = "image/png"
+
+    base64_image = base64.b64encode(contents).decode("utf-8")
+    data_url = f"data:{mime_type};base64,{base64_image}"
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": """
+Analyze this image carefully and return ONLY valid JSON with this shape:
+{
+  "summary": "short summary",
+  "visible_text": "all important visible text",
+  "labels": ["object1", "object2"],
+  "numbers": ["number1", "number2"],
+  "table_like_content": "describe any table if present"
+}
+"""
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": data_url,
+                        "detail": "high"
+                    }
+                ]
+            }
+        ]
+    )
+
+    raw = response.output_text.strip()
+    if raw.startswith("```"):
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = {
+            "summary": raw,
+            "visible_text": "",
+            "labels": [],
+            "numbers": [],
+            "table_like_content": ""
+        }
+
+    summary = parsed.get("summary", "")
+    visible_text = parsed.get("visible_text", "")
+    labels = parsed.get("labels", [])
+    numbers = parsed.get("numbers", [])
+    table_like_content = parsed.get("table_like_content", "")
+
+    embedding_text = "\n".join([
+        f"Image summary: {summary}",
+        f"Visible text: {visible_text}",
+        f"Labels: {', '.join(labels) if isinstance(labels, list) else str(labels)}",
+        f"Numbers: {', '.join(numbers) if isinstance(numbers, list) else str(numbers)}",
+        f"Table-like content: {table_like_content}",
+    ]).strip()
+
+    extracted_data = {
+        "preview": {
+            "kind": "image",
+            "summary": summary,
+            "visible_text": visible_text,
+            "labels": labels,
+            "numbers": numbers,
+            "table_like_content": table_like_content
+        }
+    }
+
+    return embedding_text, "image", extracted_data
+
+
+def extract_file_text(filename: str, contents: bytes):
+    filename_lower = filename.lower()
+    text = ""
+    file_type = ""
+    extracted_data: Dict[str, Any] = {}
+
+    if filename_lower.endswith(".csv") or filename_lower.endswith(".xlsx"):
+        return build_csv_or_excel_preview(filename, contents)
 
     elif filename_lower.endswith(".pdf"):
         pdf = fitz.open(stream=contents, filetype="pdf")
@@ -112,13 +434,16 @@ def extract_file_text(filename: str, contents: bytes):
         text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
         file_type = "docx"
 
+    elif filename_lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        return analyze_image_with_openai(filename, contents)
+
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Could not extract text from file")
 
-    return text, file_type
+    return text, file_type, extracted_data
 
 
 def classify_document(text: str) -> str:
@@ -128,6 +453,8 @@ def classify_document(text: str) -> str:
         model="gpt-4.1-mini",
         input=f"""
 Classify this document into exactly one category from this list:
+- Spreadsheet
+- Image
 - Invoice
 - Resume
 - Loan Document
@@ -150,6 +477,27 @@ def extract_document_data(document_type: str, text: str) -> Dict[str, Any]:
     sample = text[:6000]
 
     prompt_map = {
+        "Spreadsheet": """
+Extract these fields from the spreadsheet if present:
+- dataset_name
+- likely_primary_entities
+- important_columns
+- likely_metrics
+- likely_date_columns
+- brief_summary
+
+Return valid JSON only.
+""",
+        "Image": """
+Extract these fields from the image if present:
+- title_or_subject
+- visible_text_summary
+- important_objects
+- notable_numbers
+- brief_summary
+
+Return valid JSON only.
+""",
         "Invoice": """
 Extract these fields from the invoice if present:
 - invoice_number
@@ -326,6 +674,24 @@ def insert_usage_event(
     }).execute()
 
 
+def upload_to_storage(user_id: str, filename: str, contents: bytes, content_type: Optional[str] = None) -> Tuple[str, str]:
+    safe_name = filename.replace("/", "_")
+    storage_path = f"{user_id}/{uuid.uuid4()}-{safe_name}"
+
+    file_options = {"upsert": "true"}
+    if content_type:
+        file_options["content-type"] = content_type
+
+    supabase.storage.from_(STORAGE_BUCKET).upload(
+        path=storage_path,
+        file=contents,
+        file_options=file_options
+    )
+
+    public_url = supabase.storage.from_(STORAGE_BUCKET).get_public_url(storage_path)
+    return storage_path, public_url
+
+
 @app.get("/")
 def root():
     return {"status": "ok"}
@@ -355,6 +721,22 @@ def get_documents(user_id: str):
 @app.delete("/documents/{user_id}/{filename}")
 def delete_document(user_id: str, filename: str):
     try:
+        docs_result = (
+            supabase.table("documents")
+            .select("storage_path")
+            .eq("user_id", user_id)
+            .eq("filename", filename)
+            .execute()
+        )
+
+        for row in (docs_result.data or []):
+            storage_path = row.get("storage_path")
+            if storage_path:
+                try:
+                    supabase.storage.from_(STORAGE_BUCKET).remove([storage_path])
+                except Exception:
+                    pass
+
         convo_result = (
             supabase.table("conversations")
             .select("id")
@@ -552,11 +934,19 @@ async def upload_file(
 
     try:
         contents = await file.read()
-        text, file_type = extract_file_text(file.filename, contents)
+
+        text, file_type, preview_data = extract_file_text(file.filename, contents)
         chunks = chunk_text(text)
 
         document_type = classify_document(text)
-        extracted_data = extract_document_data(document_type, text)
+        structured_data = extract_document_data(document_type, text)
+
+        storage_path, public_url = upload_to_storage(
+            user_id=user_id,
+            filename=file.filename,
+            contents=contents,
+            content_type=file.content_type
+        )
 
         supabase.table("document_chunks").delete().eq("user_id", user_id).eq("filename", file.filename).execute()
         supabase.table("document_chunks_v2").delete().eq("user_id", user_id).eq("filename", file.filename).execute()
@@ -580,13 +970,20 @@ async def upload_file(
         for i in range(0, len(rows_v2), batch_size):
             supabase.table("document_chunks_v2").insert(rows_v2[i:i + batch_size]).execute()
 
+        extracted_data = {
+            **preview_data,
+            "structured_fields": structured_data
+        }
+
         supabase.table("documents").insert({
             "user_id": user_id,
             "filename": file.filename,
             "file_type": file_type,
             "uploaded_at": now_iso,
             "document_type": document_type,
-            "extracted_data": extracted_data
+            "extracted_data": extracted_data,
+            "storage_path": storage_path,
+            "public_url": public_url
         }).execute()
 
         return {
@@ -596,7 +993,9 @@ async def upload_file(
             "saved_to_supabase": True,
             "vector_table": "document_chunks_v2",
             "document_type": document_type,
-            "extracted_data": extracted_data
+            "file_type": file_type,
+            "extracted_data": extracted_data,
+            "public_url": public_url
         }
 
     except HTTPException:
