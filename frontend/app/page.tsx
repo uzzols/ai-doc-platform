@@ -206,7 +206,12 @@ export default function Home() {
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const reportRef = useRef<HTMLDivElement | null>(null);
+
+  // Visible insights area
+  const insightsRef = useRef<HTMLDivElement | null>(null);
+
+  // Always-mounted hidden export surface
+  const exportSurfaceRef = useRef<HTMLDivElement | null>(null);
 
   const BACKEND_URL = "https://ai-doc-platform-24cv.onrender.com";
   const FRONTEND_URL = "https://ai-doc-platform-zeta.vercel.app";
@@ -254,6 +259,11 @@ export default function Home() {
     return Object.entries(structured);
   }, [selectedDocumentMeta]);
 
+  const latestMessage = useMemo(() => {
+    if (sortedHistory.length === 0) return null;
+    return sortedHistory[sortedHistory.length - 1];
+  }, [sortedHistory]);
+
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -265,6 +275,32 @@ export default function Home() {
     a.download = filename;
     a.click();
     window.URL.revokeObjectURL(url);
+  };
+
+  const formatDate = (value?: string) => {
+    if (!value) return "";
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  };
+
+  const captureExportSurface = async (): Promise<string> => {
+    if (!exportSurfaceRef.current) {
+      throw new Error("Export surface not ready");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const canvas = await html2canvas(exportSurfaceRef.current, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      logging: false,
+    });
+
+    return canvas.toDataURL("image/png");
   };
 
   const fetchSharedConversation = async (token: string) => {
@@ -432,7 +468,7 @@ export default function Home() {
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [pendingAction, loading]);
+  }, [pendingAction, loading, sortedHistory.length]);
 
   const createNewConversation = async (filename?: string) => {
     if (!user?.id) return null;
@@ -878,54 +914,56 @@ export default function Home() {
   const handleExportDocx = async () => {
     if (!user?.id || !selectedDocument) return;
 
-    const res = await fetch(`${BACKEND_URL}/export-docx-report`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        filename: selectedDocument,
-        user_id: user.id,
-      }),
-    });
+    try {
+      const snapshotBase64 = await captureExportSurface();
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      alert(data?.detail || "Failed to export DOCX");
-      return;
-    }
+      const res = await fetch(`${BACKEND_URL}/export-docx-report`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filename: selectedDocument,
+          user_id: user.id,
+          conversation_id: activeConversationId || null,
+          snapshot_base64: snapshotBase64,
+        }),
+      });
 
-    const blob = await res.blob();
-    const baseName = selectedDocument.includes(".")
-      ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
-      : selectedDocument;
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.detail || "Failed to export DOCX");
+        return;
+      }
 
-    downloadBlob(blob, `${baseName}_report.docx`);
-  };
-
-  const handleDownloadSnapshot = async () => {
-    if (!reportRef.current || !selectedDocument) return;
-
-    const canvas = await html2canvas(reportRef.current, {
-      scale: 2,
-      backgroundColor: "#ffffff",
-    });
-
-    canvas.toBlob((blob) => {
-      if (!blob) return;
+      const blob = await res.blob();
       const baseName = selectedDocument.includes(".")
         ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
         : selectedDocument;
-      downloadBlob(blob, `${baseName}_dashboard.png`);
-    });
+
+      downloadBlob(blob, `${baseName}_report.docx`);
+    } catch (error) {
+      console.error("DOCX export failed:", error);
+      alert("Failed to export DOCX");
+    }
   };
 
-  const formatDate = (value?: string) => {
-    if (!value) return "";
+  const handleDownloadSnapshot = async () => {
+    if (!selectedDocument) return;
+
     try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return value;
+      const snapshotBase64 = await captureExportSurface();
+      const response = await fetch(snapshotBase64);
+      const blob = await response.blob();
+
+      const baseName = selectedDocument.includes(".")
+        ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+        : selectedDocument;
+
+      downloadBlob(blob, `${baseName}_dashboard.png`);
+    } catch (error) {
+      console.error("Snapshot export failed:", error);
+      alert("Failed to export snapshot");
     }
   };
 
@@ -1207,12 +1245,12 @@ export default function Home() {
                 </button>
 
                 {showInsights && (
-                  <div className="mt-3" ref={reportRef}>
+                  <div className="mt-3" ref={insightsRef}>
                     {!selectedDocumentMeta ? (
                       <p className="text-xs text-gray-500">Select a document to see insights.</p>
                     ) : (
                       <div className="space-y-4 text-xs">
-                        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3">
+                        <div className="rounded-lg border border-gray-200 bg-white p-3">
                           <div className="mb-2 text-sm font-medium text-gray-800">
                             Client-ready exports
                           </div>
@@ -1229,7 +1267,7 @@ export default function Home() {
                             <button
                               onClick={handleExportPdf}
                               disabled={!selectedDocument}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
                             >
                               Download PDF
                             </button>
@@ -1237,7 +1275,7 @@ export default function Home() {
                             <button
                               onClick={handleExportDocx}
                               disabled={!selectedDocument}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
                             >
                               Download DOCX
                             </button>
@@ -1245,183 +1283,80 @@ export default function Home() {
                             <button
                               onClick={handleDownloadSnapshot}
                               disabled={!selectedDocument}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
                             >
-                              Dashboard Snapshot
+                              Download Snapshot
                             </button>
                           </div>
                         </div>
 
-                        <div>
-                          <div className="font-medium text-gray-700">Document Type</div>
-                          <div className="mt-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900">
-                            {selectedDocumentMeta.document_type || "Not available"}
+                        <div className="rounded-lg border border-gray-200 bg-white p-3">
+                          <div className="mb-2 font-medium text-gray-800">Document info</div>
+                          <div className="space-y-1">
+                            <p><span className="font-medium">Filename:</span> {selectedDocumentMeta.filename}</p>
+                            <p><span className="font-medium">Type:</span> {selectedDocumentMeta.file_type || "—"}</p>
+                            <p><span className="font-medium">Document Type:</span> {selectedDocumentMeta.document_type || "—"}</p>
+                            <p><span className="font-medium">Uploaded:</span> {formatDate(selectedDocumentMeta.uploaded_at)}</p>
                           </div>
                         </div>
 
-                        {isImageFile(selectedDocumentMeta.file_type) &&
-                          selectedDocumentMeta.public_url && (
-                            <div>
-                              <div className="font-medium text-gray-700">Image Preview</div>
-                              <div className="mt-2 overflow-hidden rounded-xl border border-gray-200 bg-white">
-                                <img
-                                  src={selectedDocumentMeta.public_url}
-                                  alt={selectedDocumentMeta.filename}
-                                  className="h-auto w-full object-contain"
-                                />
-                              </div>
-                            </div>
-                          )}
+                        {isSpreadsheetFile(selectedDocumentMeta.file_type) && (
+                          <div className="rounded-lg border border-gray-200 bg-white p-3">
+                            <div className="mb-2 font-medium text-gray-800">Workbook preview</div>
 
-                        {isImageFile(selectedDocumentMeta.file_type) &&
-                          selectedDocumentMeta.extracted_data?.preview && (
-                            <div>
-                              <div className="font-medium text-gray-700">Image Analysis</div>
-                              <div className="mt-2 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
-                                <div>
-                                  <span className="font-semibold">Summary:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.summary || "—"}
-                                </div>
-                                <div>
-                                  <span className="font-semibold">Visible Text:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.visible_text || "—"}
-                                </div>
-                                <div>
-                                  <span className="font-semibold">Labels:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.labels?.join(", ") || "—"}
-                                </div>
-                                <div>
-                                  <span className="font-semibold">Numbers:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.numbers?.join(", ") || "—"}
-                                </div>
-                                <div>
-                                  <span className="font-semibold">Table-like Content:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.table_like_content || "—"}
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                            {spreadsheetSheets.length > 0 && (
+                              <select
+                                value={selectedSheetIndex}
+                                onChange={(e) => setSelectedSheetIndex(Number(e.target.value))}
+                                className="mb-3 w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                              >
+                                {spreadsheetSheets.map((sheet, index) => (
+                                  <option key={`${sheet.sheet_name}-${index}`} value={index}>
+                                    {sheet.sheet_name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
 
-                        {isSpreadsheetFile(selectedDocumentMeta.file_type) &&
-                          spreadsheetSheets.length > 0 && (
-                            <div className="space-y-3">
-                              <div className="font-medium text-gray-700">Workbook KPIs</div>
-
-                              <div className="grid grid-cols-2 gap-2">
-                                {selectedDocumentMeta.extracted_data?.preview?.workbook_kpis?.cards?.map(
-                                  (card, index) => (
-                                    <div
-                                      key={`${card.label}-${index}`}
-                                      className="rounded-lg border border-gray-200 bg-white p-3"
-                                    >
-                                      <div className="text-[11px] text-gray-500">{card.label}</div>
-                                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                                        {card.value}
-                                      </div>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-
-                              <div>
-                                <div className="mb-2 font-medium text-gray-700">Sheets</div>
-                                <div className="flex flex-wrap gap-2">
-                                  {spreadsheetSheets.map((sheet, index) => (
-                                    <button
-                                      key={`${sheet.sheet_name}-${index}`}
-                                      onClick={() => setSelectedSheetIndex(index)}
-                                      className={`rounded-full px-3 py-1 text-[11px] ${
-                                        selectedSheetIndex === index
-                                          ? "bg-black text-white"
-                                          : "border border-gray-200 bg-white text-gray-700"
-                                      }`}
-                                    >
-                                      {sheet.sheet_name}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {selectedSheet && (
-                                <>
-                                  <div>
-                                    <div className="mb-2 font-medium text-gray-700">Sheet KPI Cards</div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                      {selectedSheet.kpis?.cards?.map((card, index) => (
-                                        <div
-                                          key={`${card.label}-${index}`}
-                                          className="rounded-lg border border-gray-200 bg-white p-3"
-                                        >
-                                          <div className="text-[11px] text-gray-500">{card.label}</div>
-                                          <div className="mt-1 text-sm font-semibold text-gray-900">
-                                            {card.value}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div className="mb-2 font-medium text-gray-700">Sheet Preview</div>
-                                    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-                                      <table className="min-w-full text-left text-xs">
-                                        <thead className="bg-gray-50">
-                                          <tr>
-                                            {selectedSheet.columns.map((col) => (
-                                              <th
-                                                key={col}
-                                                className="border-b border-gray-200 px-3 py-2 font-medium text-gray-700"
-                                              >
-                                                {col}
-                                              </th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {selectedSheet.rows.map((row, rowIndex) => (
-                                            <tr key={rowIndex} className="border-b border-gray-100 last:border-b-0">
-                                              {selectedSheet.columns.map((col) => (
-                                                <td key={`${rowIndex}-${col}`} className="px-3 py-2 text-gray-900">
-                                                  {row[col] === null || row[col] === undefined || row[col] === ""
-                                                    ? "—"
-                                                    : String(row[col])}
-                                                </td>
-                                              ))}
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                        <div>
-                          <div className="font-medium text-gray-700">Structured Fields</div>
-                          <div className="mt-1 rounded-lg border border-gray-200 bg-white p-3">
-                            {structuredEntries.length === 0 ? (
-                              <div className="text-gray-500">No structured fields available.</div>
-                            ) : (
-                              <div className="space-y-2">
-                                {structuredEntries.map(([key, value]) => (
-                                  <div
-                                    key={key}
-                                    className="border-b border-gray-100 pb-2 last:border-b-0 last:pb-0"
-                                  >
-                                    <div className="font-medium text-gray-700">
-                                      {formatFieldLabel(key)}
-                                    </div>
-                                    <div className="mt-1 whitespace-pre-wrap text-gray-900">
-                                      {renderFieldValue(value)}
-                                    </div>
+                            {selectedSheet?.kpis?.cards?.length ? (
+                              <div className="mb-3 grid grid-cols-2 gap-2">
+                                {selectedSheet.kpis.cards.slice(0, 6).map((card, idx) => (
+                                  <div key={`${card.label}-${idx}`} className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                                    <p className="text-[11px] text-gray-500">{card.label}</p>
+                                    <p className="font-semibold text-gray-800">{card.value}</p>
                                   </div>
                                 ))}
                               </div>
-                            )}
+                            ) : null}
                           </div>
-                        </div>
+                        )}
+
+                        {!isSpreadsheetFile(selectedDocumentMeta.file_type) && (
+                          <div className="rounded-lg border border-gray-200 bg-white p-3">
+                            <div className="mb-2 font-medium text-gray-800">Summary</div>
+                            <p className="whitespace-pre-wrap text-gray-700">
+                              {selectedDocumentMeta.extracted_data?.preview?.summary || "No summary available"}
+                            </p>
+                          </div>
+                        )}
+
+                        {structuredEntries.length > 0 && (
+                          <div className="rounded-lg border border-gray-200 bg-white p-3">
+                            <div className="mb-2 font-medium text-gray-800">Structured fields</div>
+                            <div className="space-y-2">
+                              {structuredEntries.slice(0, 12).map(([key, value]) => (
+                                <div key={key} className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                                  <p className="text-[11px] font-medium text-gray-500">
+                                    {formatFieldLabel(key)}
+                                  </p>
+                                  <p className="whitespace-pre-wrap text-gray-800">
+                                    {renderFieldValue(value)}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1544,61 +1479,58 @@ export default function Home() {
                         )}
 
                         <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-                          {item.filename && <span>File: {item.filename}</span>}
                           {item.created_at && <span>{formatDate(item.created_at)}</span>}
+                          {item.filename && <span>{item.filename}</span>}
                         </div>
                       </div>
                     </div>
                   </div>
                 ))}
 
-                {loading &&
-                  sortedHistory.length > 0 &&
-                  sortedHistory[sortedHistory.length - 1].answer === "" && (
-                    <div className="flex justify-start">
-                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-                          AI
-                        </p>
-                        <div className="flex items-center gap-3 text-sm text-gray-700">
-                          <LoadingDots />
-                          Thinking...
-                        </div>
-                      </div>
+                {loading && (
+                  <div className="flex justify-start">
+                    <div className="rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                        AI
+                      </p>
+                      <LoadingDots />
                     </div>
-                  )}
+                  </div>
+                )}
 
                 <div ref={chatEndRef} />
               </div>
             </div>
 
             <div className="border-t border-gray-200 bg-white px-4 py-4">
-              <div className="mx-auto w-full max-w-5xl">
-                <div className="rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="mx-auto max-w-5xl">
+                <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
                   <textarea
                     ref={inputRef}
-                    placeholder="Message your document..."
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        if (!loading) handleAsk();
+                        handleAsk();
                       }
                     }}
+                    placeholder="Ask something about your document..."
                     rows={3}
-                    className="w-full resize-none bg-transparent p-2 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+                    className="w-full resize-none border-0 bg-transparent text-sm outline-none"
                   />
 
-                  <div className="mt-2 flex items-center justify-between">
+                  <div className="mt-3 flex items-center justify-between">
                     <p className="text-xs text-gray-500">
-                      Enter to send, Shift + Enter for new line
+                      {selectedDocument
+                        ? `Selected: ${selectedDocument}`
+                        : "Select a document to start"}
                     </p>
 
                     <button
                       onClick={handleAsk}
-                      disabled={loading || !question.trim() || !selectedDocument}
-                      className="rounded-2xl bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={loading || !question.trim()}
+                      className="rounded-xl bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50"
                     >
                       {loading ? "Thinking..." : "Send"}
                     </button>
@@ -1607,6 +1539,106 @@ export default function Home() {
               </div>
             </div>
           </section>
+
+          {/* Always-mounted hidden export surface */}
+          <div
+            style={{
+              position: "fixed",
+              left: "-10000px",
+              top: 0,
+              width: "960px",
+              background: "#ffffff",
+              zIndex: -1,
+              padding: "24px",
+            }}
+          >
+            <div ref={exportSurfaceRef} className="rounded-2xl border border-gray-200 bg-white p-6 text-gray-900">
+              <div className="mb-6 flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">AI Document Report</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Snapshot generated from the current conversation and document insights
+                  </p>
+                </div>
+                <div className="text-right text-sm text-gray-500">
+                  <div>{selectedDocument || "No document selected"}</div>
+                  <div>{activeConversationId || "No active conversation"}</div>
+                </div>
+              </div>
+
+              {selectedDocumentMeta && (
+                <div className="mb-6 grid grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs text-gray-500">File Type</div>
+                    <div className="mt-1 text-lg font-semibold">{selectedDocumentMeta.file_type || "—"}</div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs text-gray-500">Document Type</div>
+                    <div className="mt-1 text-lg font-semibold">{selectedDocumentMeta.document_type || "—"}</div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs text-gray-500">Messages</div>
+                    <div className="mt-1 text-lg font-semibold">{sortedHistory.length}</div>
+                  </div>
+                </div>
+              )}
+
+              {isSpreadsheetFile(selectedDocumentMeta?.file_type) && selectedSheet?.kpis?.cards?.length ? (
+                <div className="mb-6">
+                  <h3 className="mb-3 text-lg font-semibold">Spreadsheet KPIs</h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {selectedSheet.kpis.cards.slice(0, 6).map((card, idx) => (
+                      <div key={`${card.label}-${idx}`} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-xs text-gray-500">{card.label}</div>
+                        <div className="mt-1 text-xl font-semibold">{card.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {!isSpreadsheetFile(selectedDocumentMeta?.file_type) && selectedDocumentMeta?.extracted_data?.preview?.summary && (
+                <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <h3 className="mb-2 text-lg font-semibold">Summary</h3>
+                  <p className="whitespace-pre-wrap text-sm text-gray-700">
+                    {selectedDocumentMeta.extracted_data.preview.summary}
+                  </p>
+                </div>
+              )}
+
+              {latestMessage && (
+                <div className="mb-6">
+                  <h3 className="mb-3 text-lg font-semibold">Latest Q&A</h3>
+                  <div className="space-y-3">
+                    <div className="rounded-2xl bg-black p-4 text-white">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-300">Question</div>
+                      <p className="whitespace-pre-wrap text-sm">{latestMessage.question}</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Answer</div>
+                      <p className="whitespace-pre-wrap text-sm text-gray-800">{latestMessage.answer}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {structuredEntries.length > 0 && (
+                <div>
+                  <h3 className="mb-3 text-lg font-semibold">Structured Fields</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {structuredEntries.slice(0, 8).map(([key, value]) => (
+                      <div key={key} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-xs text-gray-500">{formatFieldLabel(key)}</div>
+                        <div className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                          {renderFieldValue(value)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </main>

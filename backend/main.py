@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
 from docx import Document
+from docx.shared import Inches
 from supabase import create_client, Client
 import pandas as pd
 import io
@@ -72,6 +73,13 @@ class UpdateConversationRequest(BaseModel):
 class ExportReportRequest(BaseModel):
     filename: str
     user_id: str
+
+
+class ExportDocxWithSnapshotRequest(BaseModel):
+    filename: str
+    user_id: str
+    conversation_id: Optional[str] = None
+    snapshot_base64: Optional[str] = None
 
 
 def utc_now_iso() -> str:
@@ -850,7 +858,38 @@ def build_pdf_bytes_from_document(document: Dict[str, Any]) -> bytes:
     return output.getvalue()
 
 
-def build_docx_bytes_from_document(document: Dict[str, Any]) -> bytes:
+def get_history_for_conversation(conversation_id: str, user_id: str) -> List[Dict[str, Any]]:
+    result = (
+        supabase.table("chat_history")
+        .select("*")
+        .eq("conversation_id", conversation_id)
+        .eq("user_id", user_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return result.data or []
+
+
+def add_snapshot_to_doc(doc: Document, snapshot_base64: Optional[str]) -> None:
+    if not snapshot_base64:
+        return
+
+    try:
+        base64_data = snapshot_base64.split(",")[-1]
+        image_bytes = base64.b64decode(base64_data)
+        image_stream = io.BytesIO(image_bytes)
+
+        doc.add_heading("Visual Snapshot", level=2)
+        doc.add_picture(image_stream, width=Inches(6.5))
+    except Exception as e:
+        print("SNAPSHOT INSERT ERROR:", str(e))
+
+
+def build_docx_bytes_from_document(
+    document: Dict[str, Any],
+    conversation_messages: Optional[List[Dict[str, Any]]] = None,
+    snapshot_base64: Optional[str] = None
+) -> bytes:
     extracted_data = document.get("extracted_data") or {}
     preview = extracted_data.get("preview") or {}
     structured_fields = extracted_data.get("structured_fields") or {}
@@ -906,6 +945,14 @@ def build_docx_bytes_from_document(document: Dict[str, Any]) -> bytes:
             doc.add_heading("Labels", level=2)
             doc.add_paragraph(", ".join(preview.get("labels")))
 
+        if preview.get("numbers"):
+            doc.add_heading("Numbers", level=2)
+            doc.add_paragraph(", ".join(preview.get("numbers")))
+
+        if preview.get("table_like_content"):
+            doc.add_heading("Table-like Content", level=2)
+            doc.add_paragraph(str(preview.get("table_like_content")))
+
     if structured_fields:
         doc.add_heading("Structured Fields", level=2)
         for key, value in structured_fields.items():
@@ -914,6 +961,21 @@ def build_docx_bytes_from_document(document: Dict[str, Any]) -> bytes:
             elif isinstance(value, dict):
                 value = json.dumps(value)
             doc.add_paragraph(f"{key}: {value}")
+
+    if conversation_messages:
+        doc.add_heading("Conversation History", level=2)
+        for index, item in enumerate(conversation_messages, start=1):
+            q = item.get("question", "")
+            a = item.get("answer", "")
+            created_at = item.get("created_at", "")
+
+            doc.add_paragraph(f"Q{index}: {q}")
+            doc.add_paragraph(f"A{index}: {a}")
+
+            if created_at:
+                doc.add_paragraph(f"Created At: {created_at}")
+
+    add_snapshot_to_doc(doc, snapshot_base64)
 
     output = io.BytesIO()
     doc.save(output)
