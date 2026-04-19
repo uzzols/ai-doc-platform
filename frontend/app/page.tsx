@@ -331,10 +331,15 @@ export default function Home() {
   };
 
   const fetchHistory = async (conversationId: string) => {
-    if (!conversationId) return;
+    if (!conversationId || !user?.id) {
+      setHistory([]);
+      return;
+    }
 
     try {
-      const res = await fetch(`${BACKEND_URL}/history/${conversationId}`);
+      const res = await fetch(
+        `${BACKEND_URL}/history/${conversationId}?user_id=${encodeURIComponent(user.id)}`
+      );
       const data = await res.json();
 
       if (res.ok) {
@@ -545,8 +550,10 @@ export default function Home() {
       setFile(null);
 
       await fetchDocuments();
-      setSelectedDocument(uploadedFilename);
       await fetchConversations(searchText || undefined, true);
+      setSelectedDocument(uploadedFilename);
+      setActiveConversationId("");
+      setHistory([]);
     } catch (error) {
       console.error("Upload failed:", error);
       setMessage("Upload failed");
@@ -660,6 +667,10 @@ export default function Home() {
               }
 
               if (data.done) {
+                if (data.conversation_id) {
+                  setActiveConversationId(data.conversation_id);
+                  saveLastConversationId(user.id, data.conversation_id);
+                }
                 await fetchHistory(conversationId);
                 await fetchConversations(searchText || undefined, true, conversationId);
               }
@@ -706,7 +717,11 @@ export default function Home() {
     setPendingAction(null);
     setSelectedSheetIndex(0);
 
-    if (!filename) return;
+    if (!filename) {
+      setActiveConversationId("");
+      setHistory([]);
+      return;
+    }
 
     const matchingConversation = sortedConversations.find(
       (conversation) => conversation.filename === filename
@@ -716,6 +731,9 @@ export default function Home() {
       setActiveConversationId(matchingConversation.id);
       saveLastConversationId(user!.id, matchingConversation.id);
       await fetchHistory(matchingConversation.id);
+    } else {
+      setActiveConversationId("");
+      setHistory([]);
     }
   };
 
@@ -1297,10 +1315,22 @@ export default function Home() {
                         <div className="rounded-lg border border-gray-200 bg-white p-3">
                           <div className="mb-2 font-medium text-gray-800">Document info</div>
                           <div className="space-y-1">
-                            <p><span className="font-medium">Filename:</span> {selectedDocumentMeta.filename}</p>
-                            <p><span className="font-medium">Type:</span> {selectedDocumentMeta.file_type || "—"}</p>
-                            <p><span className="font-medium">Document Type:</span> {selectedDocumentMeta.document_type || "—"}</p>
-                            <p><span className="font-medium">Uploaded:</span> {formatDate(selectedDocumentMeta.uploaded_at)}</p>
+                            <p>
+                              <span className="font-medium">Filename:</span>{" "}
+                              {selectedDocumentMeta.filename}
+                            </p>
+                            <p>
+                              <span className="font-medium">Type:</span>{" "}
+                              {selectedDocumentMeta.file_type || "—"}
+                            </p>
+                            <p>
+                              <span className="font-medium">Document Type:</span>{" "}
+                              {selectedDocumentMeta.document_type || "—"}
+                            </p>
+                            <p>
+                              <span className="font-medium">Uploaded:</span>{" "}
+                              {formatDate(selectedDocumentMeta.uploaded_at)}
+                            </p>
                           </div>
                         </div>
 
@@ -1325,7 +1355,10 @@ export default function Home() {
                             {selectedSheet?.kpis?.cards?.length ? (
                               <div className="mb-3 grid grid-cols-2 gap-2">
                                 {selectedSheet.kpis.cards.slice(0, 6).map((card, idx) => (
-                                  <div key={`${card.label}-${idx}`} className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                                  <div
+                                    key={`${card.label}-${idx}`}
+                                    className="rounded-md border border-gray-200 bg-gray-50 p-2"
+                                  >
                                     <p className="text-[11px] text-gray-500">{card.label}</p>
                                     <p className="font-semibold text-gray-800">{card.value}</p>
                                   </div>
@@ -1339,7 +1372,8 @@ export default function Home() {
                           <div className="rounded-lg border border-gray-200 bg-white p-3">
                             <div className="mb-2 font-medium text-gray-800">Summary</div>
                             <p className="whitespace-pre-wrap text-gray-700">
-                              {selectedDocumentMeta.extracted_data?.preview?.summary || "No summary available"}
+                              {selectedDocumentMeta.extracted_data?.preview?.summary ||
+                                "No summary available"}
                             </p>
                           </div>
                         )}
@@ -1349,7 +1383,10 @@ export default function Home() {
                             <div className="mb-2 font-medium text-gray-800">Structured fields</div>
                             <div className="space-y-2">
                               {structuredEntries.slice(0, 12).map(([key, value]) => (
-                                <div key={key} className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                                <div
+                                  key={key}
+                                  className="rounded-md border border-gray-200 bg-gray-50 p-2"
+                                >
                                   <p className="text-[11px] font-medium text-gray-500">
                                     {formatFieldLabel(key)}
                                   </p>
@@ -1577,11 +1614,15 @@ export default function Home() {
                 <div className="mb-6 grid grid-cols-3 gap-3">
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <div className="text-xs text-gray-500">File Type</div>
-                    <div className="mt-1 text-lg font-semibold">{selectedDocumentMeta.file_type || "—"}</div>
+                    <div className="mt-1 text-lg font-semibold">
+                      {selectedDocumentMeta.file_type || "—"}
+                    </div>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <div className="text-xs text-gray-500">Document Type</div>
-                    <div className="mt-1 text-lg font-semibold">{selectedDocumentMeta.document_type || "—"}</div>
+                    <div className="mt-1 text-lg font-semibold">
+                      {selectedDocumentMeta.document_type || "—"}
+                    </div>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <div className="text-xs text-gray-500">Messages</div>
