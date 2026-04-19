@@ -121,21 +121,25 @@ function detectActionIntent(text: string) {
     lower.includes("create pdf") ||
     lower.includes("export pdf") ||
     lower.includes("download pdf") ||
+    lower.includes("download as pdf") ||
     lower.includes("pdf file") ||
     lower.includes("generate pdf");
 
   const wantsExcel =
     lower.includes("export excel") ||
     lower.includes("download excel") ||
+    lower.includes("download as excel") ||
     lower.includes("excel file") ||
     lower.includes("xlsx") ||
-    lower.includes("spreadsheet export");
+    lower.includes("spreadsheet export") ||
+    lower.includes("export to excel");
 
   const wantsSnapshot =
     lower.includes("snapshot") ||
     lower.includes("dashboard image") ||
     lower.includes("download image") ||
     lower.includes("export image") ||
+    lower.includes("download png") ||
     lower.includes("png");
 
   if (wantsPdf) return "pdf";
