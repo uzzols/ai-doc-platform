@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useUser, UserButton } from "@clerk/nextjs";
+import html2canvas from "html2canvas";
 
 type ChatItem = {
   id?: string;
@@ -141,6 +142,7 @@ export default function Home() {
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const reportRef = useRef<HTMLDivElement | null>(null);
 
   const BACKEND_URL = "https://ai-doc-platform-24cv.onrender.com";
   const FRONTEND_URL = "https://ai-doc-platform-zeta.vercel.app";
@@ -190,6 +192,15 @@ export default function Home() {
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
   };
 
   const fetchSharedConversation = async (token: string) => {
@@ -754,6 +765,94 @@ export default function Home() {
     }
   };
 
+  const handleExportExcel = async () => {
+    if (!user?.id || !selectedDocument) return;
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/export-excel-report`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filename: selectedDocument,
+          user_id: user.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.detail || "Failed to export Excel");
+        return;
+      }
+
+      const blob = await res.blob();
+      const baseName = selectedDocument.includes(".")
+        ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+        : selectedDocument;
+
+      downloadBlob(blob, `${baseName}_report.xlsx`);
+    } catch (error) {
+      console.error("Export Excel failed:", error);
+      alert("Export Excel failed");
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!user?.id || !selectedDocument) return;
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/export-pdf-report`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filename: selectedDocument,
+          user_id: user.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.detail || "Failed to export PDF");
+        return;
+      }
+
+      const blob = await res.blob();
+      const baseName = selectedDocument.includes(".")
+        ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+        : selectedDocument;
+
+      downloadBlob(blob, `${baseName}_report.pdf`);
+    } catch (error) {
+      console.error("Export PDF failed:", error);
+      alert("Export PDF failed");
+    }
+  };
+
+  const handleDownloadSnapshot = async () => {
+    if (!reportRef.current || !selectedDocument) return;
+
+    try {
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+      });
+
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const baseName = selectedDocument.includes(".")
+          ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+          : selectedDocument;
+        downloadBlob(blob, `${baseName}_dashboard.png`);
+      });
+    } catch (error) {
+      console.error("Snapshot failed:", error);
+      alert("Snapshot failed");
+    }
+  };
+
   const formatDate = (value?: string) => {
     if (!value) return "";
     try {
@@ -1046,13 +1145,43 @@ export default function Home() {
                 </button>
 
                 {showInsights && (
-                  <div className="mt-3">
+                  <div className="mt-3" ref={reportRef}>
                     {!selectedDocumentMeta ? (
                       <p className="text-xs text-gray-500">
                         Select a document to see insights.
                       </p>
                     ) : (
                       <div className="space-y-4 text-xs">
+                        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3">
+                          <div className="mb-2 text-sm font-medium text-gray-800">Client-ready exports</div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={handleExportExcel}
+                              disabled={!selectedDocument}
+                              className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800 disabled:opacity-50"
+                            >
+                              Download Excel
+                            </button>
+
+                            <button
+                              onClick={handleExportPdf}
+                              disabled={!selectedDocument}
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Download PDF
+                            </button>
+
+                            <button
+                              onClick={handleDownloadSnapshot}
+                              disabled={!selectedDocument}
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Dashboard Snapshot
+                            </button>
+                          </div>
+                        </div>
+
                         <div>
                           <div className="font-medium text-gray-700">Document Type</div>
                           <div className="mt-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900">
