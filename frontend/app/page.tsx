@@ -114,6 +114,36 @@ function isImageFile(fileType?: string | null) {
   return fileType === "image";
 }
 
+function detectActionIntent(text: string) {
+  const lower = text.toLowerCase();
+
+  const wantsPdf =
+    lower.includes("create pdf") ||
+    lower.includes("export pdf") ||
+    lower.includes("download pdf") ||
+    lower.includes("pdf file") ||
+    lower.includes("generate pdf");
+
+  const wantsExcel =
+    lower.includes("export excel") ||
+    lower.includes("download excel") ||
+    lower.includes("excel file") ||
+    lower.includes("xlsx") ||
+    lower.includes("spreadsheet export");
+
+  const wantsSnapshot =
+    lower.includes("snapshot") ||
+    lower.includes("dashboard image") ||
+    lower.includes("download image") ||
+    lower.includes("export image") ||
+    lower.includes("png");
+
+  if (wantsPdf) return "pdf";
+  if (wantsExcel) return "excel";
+  if (wantsSnapshot) return "snapshot";
+  return null;
+}
+
 export default function Home() {
   const { isSignedIn, user } = useUser();
 
@@ -132,6 +162,7 @@ export default function Home() {
   const [sharedTitle, setSharedTitle] = useState("");
   const [showInsights, setShowInsights] = useState(false);
   const [selectedSheetIndex, setSelectedSheetIndex] = useState(0);
+  const [pendingAction, setPendingAction] = useState<null | "pdf" | "excel" | "snapshot">(null);
 
   const [history, setHistory] = useState<ChatItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -378,6 +409,7 @@ export default function Home() {
         setAnswer("");
         setDisplayedAnswer("");
         setShareLink("");
+        setPendingAction(null);
 
         await fetchConversations(searchText || undefined, true, newConversation.id);
 
@@ -436,6 +468,7 @@ export default function Home() {
       setAnswer("");
       setDisplayedAnswer("");
       setShareLink("");
+      setPendingAction(null);
 
       setActiveConversationId("");
       setHistory([]);
@@ -470,6 +503,9 @@ export default function Home() {
     }
 
     const currentQuestion = question.trim();
+    const detectedAction = detectActionIntent(currentQuestion);
+    setPendingAction(detectedAction);
+
     setQuestion("");
     setAnswer("");
     setDisplayedAnswer("");
@@ -589,6 +625,7 @@ export default function Home() {
     setAnswer("");
     setDisplayedAnswer("");
     setShareLink("");
+    setPendingAction(null);
     await fetchHistory(conversation.id);
   };
 
@@ -598,6 +635,7 @@ export default function Home() {
     setAnswer("");
     setDisplayedAnswer("");
     setShareLink("");
+    setPendingAction(null);
     setSelectedSheetIndex(0);
 
     if (!filename) {
@@ -628,6 +666,7 @@ export default function Home() {
     setAnswer("");
     setDisplayedAnswer("");
     setShareLink("");
+    setPendingAction(null);
     setHistory([]);
 
     await createNewConversation(selectedDocument);
@@ -646,6 +685,7 @@ export default function Home() {
         setAnswer("");
         setDisplayedAnswer("");
         setShareLink("");
+        setPendingAction(null);
       }
 
       const updatedConvos = await fetchConversations(
@@ -744,6 +784,7 @@ export default function Home() {
         setAnswer("");
         setDisplayedAnswer("");
         setShareLink("");
+        setPendingAction(null);
 
         const docs = await fetchDocuments();
         const remainingDocs = (docs || []).filter(
@@ -1486,6 +1527,37 @@ export default function Home() {
                         <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
                           {item.answer}
                         </p>
+
+                        {index === sortedHistory.length - 1 && pendingAction && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {pendingAction === "pdf" && (
+                              <button
+                                onClick={handleExportPdf}
+                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                              >
+                                Download PDF
+                              </button>
+                            )}
+
+                            {pendingAction === "excel" && (
+                              <button
+                                onClick={handleExportExcel}
+                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                              >
+                                Download Excel
+                              </button>
+                            )}
+
+                            {pendingAction === "snapshot" && (
+                              <button
+                                onClick={handleDownloadSnapshot}
+                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                              >
+                                Download Snapshot
+                              </button>
+                            )}
+                          </div>
+                        )}
 
                         <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
                           {item.filename && <span>File: {item.filename}</span>}
