@@ -1213,8 +1213,16 @@ def ask_ai(request: AskRequest):
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=f"""
-Answer using only this context:
+You are inside an AI document platform.
 
+Answer using only this context.
+
+Important:
+- If the user asks to export or create a PDF, Excel, or snapshot, do NOT say you cannot do it.
+- Instead, briefly say that the export can be done using the platform action button.
+- Keep the answer short and helpful.
+
+Context:
 {context}
 
 Question:
@@ -1310,8 +1318,16 @@ def ask_ai_stream(request: AskRequest):
             stream = client.responses.create(
                 model="gpt-4.1-mini",
                 input=f"""
-Answer using only this context:
+You are inside an AI document platform.
 
+Answer using only this context.
+
+Important:
+- If the user asks to export or create a PDF, Excel, or snapshot, do NOT say you cannot do it.
+- Instead, briefly say that the export can be done using the platform action button.
+- Keep the answer short and helpful.
+
+Context:
 {context}
 
 Question:
