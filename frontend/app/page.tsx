@@ -115,7 +115,7 @@ function isImageFile(fileType?: string | null) {
 }
 
 function detectActionIntent(text: string) {
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
 
   const wantsPdf =
     lower.includes("create pdf") ||
@@ -134,6 +134,15 @@ function detectActionIntent(text: string) {
     lower.includes("spreadsheet export") ||
     lower.includes("export to excel");
 
+  const wantsDocx =
+    lower.includes("create docx") ||
+    lower.includes("download docx") ||
+    lower.includes("export docx") ||
+    lower.includes("create word") ||
+    lower.includes("download word") ||
+    lower.includes("word file") ||
+    lower.includes("docx file");
+
   const wantsSnapshot =
     lower.includes("snapshot") ||
     lower.includes("dashboard image") ||
@@ -144,6 +153,7 @@ function detectActionIntent(text: string) {
 
   if (wantsPdf) return "pdf";
   if (wantsExcel) return "excel";
+  if (wantsDocx) return "docx";
   if (wantsSnapshot) return "snapshot";
   return null;
 }
@@ -185,7 +195,7 @@ export default function Home() {
   const [sharedTitle, setSharedTitle] = useState("");
   const [showInsights, setShowInsights] = useState(false);
   const [selectedSheetIndex, setSelectedSheetIndex] = useState(0);
-  const [pendingAction, setPendingAction] = useState<null | "pdf" | "excel" | "snapshot">(null);
+  const [pendingAction, setPendingAction] = useState<null | "pdf" | "excel" | "docx" | "snapshot">(null);
 
   const [history, setHistory] = useState<ChatItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -343,25 +353,19 @@ export default function Home() {
 
       if (preferredConversationId) {
         const preferred = convos.find((c) => c.id === preferredConversationId);
-        if (preferred) {
-          targetConversationId = preferred.id;
-        }
+        if (preferred) targetConversationId = preferred.id;
       }
 
       if (!targetConversationId && preserveActive && activeConversationId) {
         const existingActive = convos.find((c) => c.id === activeConversationId);
-        if (existingActive) {
-          targetConversationId = existingActive.id;
-        }
+        if (existingActive) targetConversationId = existingActive.id;
       }
 
       if (!targetConversationId) {
         const savedConversationId = loadLastConversationId(user.id);
         if (savedConversationId) {
           const savedConversation = convos.find((c) => c.id === savedConversationId);
-          if (savedConversation) {
-            targetConversationId = savedConversation.id;
-          }
+          if (savedConversation) targetConversationId = savedConversation.id;
         }
       }
 
@@ -400,7 +404,6 @@ export default function Home() {
         await fetchDocuments();
         await fetchConversations(undefined, true);
       };
-
       init();
     }
   }, [isSignedIn, user?.id]);
@@ -412,6 +415,24 @@ export default function Home() {
   useEffect(() => {
     setSelectedSheetIndex(0);
   }, [selectedDocument]);
+
+  useEffect(() => {
+    if (!pendingAction || loading) return;
+    if (sortedHistory.length === 0) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        if (pendingAction === "pdf") await handleExportPdf();
+        if (pendingAction === "excel") await handleExportExcel();
+        if (pendingAction === "docx") await handleExportDocx();
+        if (pendingAction === "snapshot") await handleDownloadSnapshot();
+      } catch (e) {
+        console.error("Auto export failed:", e);
+      }
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [pendingAction, loading]);
 
   const createNewConversation = async (filename?: string) => {
     if (!user?.id) return null;
@@ -496,7 +517,6 @@ export default function Home() {
       setFile(null);
 
       await fetchDocuments();
-
       setSelectedDocument(uploadedFilename);
       await fetchConversations(searchText || undefined, true);
     } catch (error) {
@@ -573,9 +593,7 @@ export default function Home() {
         return;
       }
 
-      if (!res.body) {
-        throw new Error("No response stream");
-      }
+      if (!res.body) throw new Error("No response stream");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
@@ -608,9 +626,7 @@ export default function Home() {
 
                 setHistory((prev) =>
                   prev.map((item, index) =>
-                    index === prev.length - 1
-                      ? { ...item, answer: finalText }
-                      : item
+                    index === prev.length - 1 ? { ...item, answer: finalText } : item
                   )
                 );
               }
@@ -632,9 +648,7 @@ export default function Home() {
 
       setHistory((prev) =>
         prev.map((item, index) =>
-          index === prev.length - 1
-            ? { ...item, answer: errorMessage }
-            : item
+          index === prev.length - 1 ? { ...item, answer: errorMessage } : item
         )
       );
       setAnswer(errorMessage);
@@ -664,9 +678,7 @@ export default function Home() {
     setPendingAction(null);
     setSelectedSheetIndex(0);
 
-    if (!filename) {
-      return;
-    }
+    if (!filename) return;
 
     const matchingConversation = sortedConversations.find(
       (conversation) => conversation.filename === filename
@@ -746,12 +758,9 @@ export default function Home() {
 
   const handleShareConversation = async (conversationId: string) => {
     try {
-      const res = await fetch(
-        `${BACKEND_URL}/conversations/${conversationId}/share`,
-        {
-          method: "POST",
-        }
-      );
+      const res = await fetch(`${BACKEND_URL}/conversations/${conversationId}/share`, {
+        method: "POST",
+      });
       const data = await res.json();
 
       if (res.ok && data?.share_path) {
@@ -783,12 +792,9 @@ export default function Home() {
       const deletedDocument = selectedDocument;
       const encodedFilename = encodeURIComponent(deletedDocument);
 
-      const res = await fetch(
-        `${BACKEND_URL}/documents/${user.id}/${encodedFilename}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const res = await fetch(`${BACKEND_URL}/documents/${user.id}/${encodedFilename}`, {
+        method: "DELETE",
+      });
 
       if (res.ok) {
         const docs = await fetchDocuments();
@@ -816,89 +822,102 @@ export default function Home() {
   const handleExportExcel = async () => {
     if (!user?.id || !selectedDocument) return;
 
-    try {
-      const res = await fetch(`${BACKEND_URL}/export-excel-report`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          filename: selectedDocument,
-          user_id: user.id,
-        }),
-      });
+    const res = await fetch(`${BACKEND_URL}/export-excel-report`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: selectedDocument,
+        user_id: user.id,
+      }),
+    });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        alert(data?.detail || "Failed to export Excel");
-        return;
-      }
-
-      const blob = await res.blob();
-      const baseName = selectedDocument.includes(".")
-        ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
-        : selectedDocument;
-
-      downloadBlob(blob, `${baseName}_report.xlsx`);
-    } catch (error) {
-      console.error("Export Excel failed:", error);
-      alert("Export Excel failed");
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      alert(data?.detail || "Failed to export Excel");
+      return;
     }
+
+    const blob = await res.blob();
+    const baseName = selectedDocument.includes(".")
+      ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+      : selectedDocument;
+
+    downloadBlob(blob, `${baseName}_report.xlsx`);
   };
 
   const handleExportPdf = async () => {
     if (!user?.id || !selectedDocument) return;
 
-    try {
-      const res = await fetch(`${BACKEND_URL}/export-pdf-report`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          filename: selectedDocument,
-          user_id: user.id,
-        }),
-      });
+    const res = await fetch(`${BACKEND_URL}/export-pdf-report`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: selectedDocument,
+        user_id: user.id,
+      }),
+    });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        alert(data?.detail || "Failed to export PDF");
-        return;
-      }
-
-      const blob = await res.blob();
-      const baseName = selectedDocument.includes(".")
-        ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
-        : selectedDocument;
-
-      downloadBlob(blob, `${baseName}_report.pdf`);
-    } catch (error) {
-      console.error("Export PDF failed:", error);
-      alert("Export PDF failed");
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      alert(data?.detail || "Failed to export PDF");
+      return;
     }
+
+    const blob = await res.blob();
+    const baseName = selectedDocument.includes(".")
+      ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+      : selectedDocument;
+
+    downloadBlob(blob, `${baseName}_report.pdf`);
+  };
+
+  const handleExportDocx = async () => {
+    if (!user?.id || !selectedDocument) return;
+
+    const res = await fetch(`${BACKEND_URL}/export-docx-report`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: selectedDocument,
+        user_id: user.id,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      alert(data?.detail || "Failed to export DOCX");
+      return;
+    }
+
+    const blob = await res.blob();
+    const baseName = selectedDocument.includes(".")
+      ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+      : selectedDocument;
+
+    downloadBlob(blob, `${baseName}_report.docx`);
   };
 
   const handleDownloadSnapshot = async () => {
     if (!reportRef.current || !selectedDocument) return;
 
-    try {
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        backgroundColor: "#ffffff",
-      });
+    const canvas = await html2canvas(reportRef.current, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+    });
 
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        const baseName = selectedDocument.includes(".")
-          ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
-          : selectedDocument;
-        downloadBlob(blob, `${baseName}_dashboard.png`);
-      });
-    } catch (error) {
-      console.error("Snapshot failed:", error);
-      alert("Snapshot failed");
-    }
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const baseName = selectedDocument.includes(".")
+        ? selectedDocument.substring(0, selectedDocument.lastIndexOf("."))
+        : selectedDocument;
+      downloadBlob(blob, `${baseName}_dashboard.png`);
+    });
   };
 
   const formatDate = (value?: string) => {
@@ -927,9 +946,7 @@ export default function Home() {
               <div key={item.id || `${item.question}-${index}`} className="space-y-4">
                 <div className="flex justify-end">
                   <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
-                    <p className="whitespace-pre-wrap text-sm leading-6">
-                      {item.question}
-                    </p>
+                    <p className="whitespace-pre-wrap text-sm leading-6">{item.question}</p>
                   </div>
                 </div>
 
@@ -1041,10 +1058,7 @@ export default function Home() {
                     <>
                       <option value="">Select a document</option>
                       {sortedDocuments.map((doc, index) => (
-                        <option
-                          key={doc.id || `${doc.filename}-${index}`}
-                          value={doc.filename}
-                        >
+                        <option key={doc.id || `${doc.filename}-${index}`} value={doc.filename}>
                           {doc.filename}
                         </option>
                       ))}
@@ -1195,9 +1209,7 @@ export default function Home() {
                 {showInsights && (
                   <div className="mt-3" ref={reportRef}>
                     {!selectedDocumentMeta ? (
-                      <p className="text-xs text-gray-500">
-                        Select a document to see insights.
-                      </p>
+                      <p className="text-xs text-gray-500">Select a document to see insights.</p>
                     ) : (
                       <div className="space-y-4 text-xs">
                         <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3">
@@ -1220,6 +1232,14 @@ export default function Home() {
                               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
                             >
                               Download PDF
+                            </button>
+
+                            <button
+                              onClick={handleExportDocx}
+                              disabled={!selectedDocument}
+                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Download DOCX
                             </button>
 
                             <button
@@ -1268,18 +1288,15 @@ export default function Home() {
                                 </div>
                                 <div>
                                   <span className="font-semibold">Labels:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.labels?.join(", ") ||
-                                    "—"}
+                                  {selectedDocumentMeta.extracted_data.preview.labels?.join(", ") || "—"}
                                 </div>
                                 <div>
                                   <span className="font-semibold">Numbers:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.numbers?.join(", ") ||
-                                    "—"}
+                                  {selectedDocumentMeta.extracted_data.preview.numbers?.join(", ") || "—"}
                                 </div>
                                 <div>
                                   <span className="font-semibold">Table-like Content:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview
-                                    .table_like_content || "—"}
+                                  {selectedDocumentMeta.extracted_data.preview.table_like_content || "—"}
                                 </div>
                               </div>
                             </div>
@@ -1297,9 +1314,7 @@ export default function Home() {
                                       key={`${card.label}-${index}`}
                                       className="rounded-lg border border-gray-200 bg-white p-3"
                                     >
-                                      <div className="text-[11px] text-gray-500">
-                                        {card.label}
-                                      </div>
+                                      <div className="text-[11px] text-gray-500">{card.label}</div>
                                       <div className="mt-1 text-sm font-semibold text-gray-900">
                                         {card.value}
                                       </div>
@@ -1330,18 +1345,14 @@ export default function Home() {
                               {selectedSheet && (
                                 <>
                                   <div>
-                                    <div className="mb-2 font-medium text-gray-700">
-                                      Sheet KPI Cards
-                                    </div>
+                                    <div className="mb-2 font-medium text-gray-700">Sheet KPI Cards</div>
                                     <div className="grid grid-cols-2 gap-2">
                                       {selectedSheet.kpis?.cards?.map((card, index) => (
                                         <div
                                           key={`${card.label}-${index}`}
                                           className="rounded-lg border border-gray-200 bg-white p-3"
                                         >
-                                          <div className="text-[11px] text-gray-500">
-                                            {card.label}
-                                          </div>
+                                          <div className="text-[11px] text-gray-500">{card.label}</div>
                                           <div className="mt-1 text-sm font-semibold text-gray-900">
                                             {card.value}
                                           </div>
@@ -1351,9 +1362,7 @@ export default function Home() {
                                   </div>
 
                                   <div>
-                                    <div className="mb-2 font-medium text-gray-700">
-                                      Sheet Preview
-                                    </div>
+                                    <div className="mb-2 font-medium text-gray-700">Sheet Preview</div>
                                     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
                                       <table className="min-w-full text-left text-xs">
                                         <thead className="bg-gray-50">
@@ -1370,18 +1379,10 @@ export default function Home() {
                                         </thead>
                                         <tbody>
                                           {selectedSheet.rows.map((row, rowIndex) => (
-                                            <tr
-                                              key={rowIndex}
-                                              className="border-b border-gray-100 last:border-b-0"
-                                            >
+                                            <tr key={rowIndex} className="border-b border-gray-100 last:border-b-0">
                                               {selectedSheet.columns.map((col) => (
-                                                <td
-                                                  key={`${rowIndex}-${col}`}
-                                                  className="px-3 py-2 text-gray-900"
-                                                >
-                                                  {row[col] === null ||
-                                                  row[col] === undefined ||
-                                                  row[col] === ""
+                                                <td key={`${rowIndex}-${col}`} className="px-3 py-2 text-gray-900">
+                                                  {row[col] === null || row[col] === undefined || row[col] === ""
                                                     ? "—"
                                                     : String(row[col])}
                                                 </td>
@@ -1392,59 +1393,6 @@ export default function Home() {
                                       </table>
                                     </div>
                                   </div>
-
-                                  {!!selectedSheet.kpis?.numeric_summaries?.length && (
-                                    <div>
-                                      <div className="mb-2 font-medium text-gray-700">
-                                        Numeric Summary
-                                      </div>
-                                      <div className="space-y-2">
-                                        {selectedSheet.kpis.numeric_summaries.map(
-                                          (item, index) => (
-                                            <div
-                                              key={`${item.column}-${index}`}
-                                              className="rounded-lg border border-gray-200 bg-white p-3"
-                                            >
-                                              <div className="font-medium text-gray-800">
-                                                {item.column}
-                                              </div>
-                                              <div className="mt-1 text-gray-600">
-                                                Count: {item.count} | Sum: {item.sum} | Avg:{" "}
-                                                {item.average} | Min: {item.min} | Max:{" "}
-                                                {item.max}
-                                              </div>
-                                            </div>
-                                          )
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {!!selectedSheet.kpis?.column_profiles?.length && (
-                                    <div>
-                                      <div className="mb-2 font-medium text-gray-700">
-                                        Column Profiles
-                                      </div>
-                                      <div className="space-y-2">
-                                        {selectedSheet.kpis.column_profiles.map(
-                                          (item, index) => (
-                                            <div
-                                              key={`${item.column}-${index}`}
-                                              className="rounded-lg border border-gray-200 bg-white p-3"
-                                            >
-                                              <div className="font-medium text-gray-800">
-                                                {item.column}
-                                              </div>
-                                              <div className="mt-1 text-gray-600">
-                                                Type: {item.dtype} | Non-null: {item.non_null} |
-                                                Nulls: {item.nulls} | Unique: {item.unique}
-                                              </div>
-                                            </div>
-                                          )
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
                                 </>
                               )}
                             </div>
@@ -1454,9 +1402,7 @@ export default function Home() {
                           <div className="font-medium text-gray-700">Structured Fields</div>
                           <div className="mt-1 rounded-lg border border-gray-200 bg-white p-3">
                             {structuredEntries.length === 0 ? (
-                              <div className="text-gray-500">
-                                No structured fields available.
-                              </div>
+                              <div className="text-gray-500">No structured fields available.</div>
                             ) : (
                               <div className="space-y-2">
                                 {structuredEntries.map(([key, value]) => (
@@ -1499,9 +1445,7 @@ export default function Home() {
                 <div>
                   <h1 className="text-lg font-semibold">AI Document Platform</h1>
                   <p className="text-xs text-gray-500">
-                    {selectedDocument
-                      ? `Current file: ${selectedDocument}`
-                      : "No file selected"}
+                    {selectedDocument ? `Current file: ${selectedDocument}` : "No file selected"}
                   </p>
                 </div>
               </div>
@@ -1522,9 +1466,7 @@ export default function Home() {
                 {shareLink && (
                   <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
                     Share link copied:
-                    <div className="mt-2 break-all text-xs text-gray-500">
-                      {shareLink}
-                    </div>
+                    <div className="mt-2 break-all text-xs text-gray-500">{shareLink}</div>
                   </div>
                 )}
 
@@ -1547,9 +1489,7 @@ export default function Home() {
                   <div key={item.id || `${item.question}-${index}`} className="space-y-4">
                     <div className="flex justify-end">
                       <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
-                        <p className="whitespace-pre-wrap text-sm leading-6">
-                          {item.question}
-                        </p>
+                        <p className="whitespace-pre-wrap text-sm leading-6">{item.question}</p>
                       </div>
                     </div>
 
@@ -1580,6 +1520,15 @@ export default function Home() {
                                 className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
                               >
                                 Download Excel
+                              </button>
+                            )}
+
+                            {pendingAction === "docx" && (
+                              <button
+                                onClick={handleExportDocx}
+                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                              >
+                                Download DOCX
                               </button>
                             )}
 
