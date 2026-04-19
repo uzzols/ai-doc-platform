@@ -94,9 +94,7 @@ function LoadingDots() {
 }
 
 function formatFieldLabel(key: string) {
-  return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function renderFieldValue(value: any) {
@@ -912,7 +910,13 @@ export default function Home() {
     }
 
     try {
-      const snapshotBase64 = await captureExportSurface();
+      let snapshotBase64: string | null = null;
+
+      try {
+        snapshotBase64 = await captureExportSurface();
+      } catch (snapshotError) {
+        console.error("Snapshot capture failed, continuing without image:", snapshotError);
+      }
 
       const res = await fetch(`${BACKEND_URL}/export-docx-report`, {
         method: "POST",
@@ -1586,12 +1590,16 @@ export default function Home() {
                 </div>
               )}
 
-              {isSpreadsheetFile(selectedDocumentMeta?.file_type) && selectedSheet?.kpis?.cards?.length ? (
+              {isSpreadsheetFile(selectedDocumentMeta?.file_type) &&
+              selectedSheet?.kpis?.cards?.length ? (
                 <div className="mb-6">
                   <h3 className="mb-3 text-lg font-semibold">Spreadsheet KPIs</h3>
                   <div className="grid grid-cols-3 gap-3">
                     {selectedSheet.kpis.cards.slice(0, 6).map((card, idx) => (
-                      <div key={`${card.label}-${idx}`} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div
+                        key={`${card.label}-${idx}`}
+                        className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                      >
                         <div className="text-xs text-gray-500">{card.label}</div>
                         <div className="mt-1 text-xl font-semibold">{card.value}</div>
                       </div>
@@ -1600,26 +1608,33 @@ export default function Home() {
                 </div>
               ) : null}
 
-              {!isSpreadsheetFile(selectedDocumentMeta?.file_type) && selectedDocumentMeta?.extracted_data?.preview?.summary && (
+              {!isSpreadsheetFile(selectedDocumentMeta?.file_type) &&
+              selectedDocumentMeta?.extracted_data?.preview?.summary ? (
                 <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
                   <h3 className="mb-2 text-lg font-semibold">Summary</h3>
                   <p className="whitespace-pre-wrap text-sm text-gray-700">
                     {selectedDocumentMeta.extracted_data.preview.summary}
                   </p>
                 </div>
-              )}
+              ) : null}
 
               {latestMessage && (
                 <div className="mb-6">
                   <h3 className="mb-3 text-lg font-semibold">Latest Q&A</h3>
                   <div className="space-y-3">
                     <div className="rounded-2xl bg-black p-4 text-white">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-300">Question</div>
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-300">
+                        Question
+                      </div>
                       <p className="whitespace-pre-wrap text-sm">{latestMessage.question}</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">Answer</div>
-                      <p className="whitespace-pre-wrap text-sm text-gray-800">{latestMessage.answer}</p>
+                      <div className="mb-1 text-xs uppercase tracking-wide text-gray-500">
+                        Answer
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm text-gray-800">
+                        {latestMessage.answer}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1630,7 +1645,10 @@ export default function Home() {
                   <h3 className="mb-3 text-lg font-semibold">Structured Fields</h3>
                   <div className="grid grid-cols-2 gap-3">
                     {structuredEntries.slice(0, 8).map(([key, value]) => (
-                      <div key={key} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div
+                        key={key}
+                        className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                      >
                         <div className="text-xs text-gray-500">{formatFieldLabel(key)}</div>
                         <div className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
                           {renderFieldValue(value)}
