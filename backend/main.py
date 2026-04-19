@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -1197,15 +1196,18 @@ def get_shared_conversation(share_token: str):
 
 
 @app.get("/history/{conversation_id}")
-def get_chat_history(conversation_id: str):
+def get_chat_history(conversation_id: str, user_id: Optional[str] = None):
     try:
-        result = (
+        query = (
             supabase.table("chat_history")
             .select("*")
             .eq("conversation_id", conversation_id)
-            .order("created_at", desc=False)
-            .execute()
         )
+
+        if user_id:
+            query = query.eq("user_id", user_id)
+
+        result = query.order("created_at", desc=False).execute()
         return result.data
     except Exception as e:
         print("HISTORY ERROR:", str(e))
@@ -1483,6 +1485,7 @@ Question:
 
             payload = {
                 "done": True,
+                "conversation_id": request.conversation_id,
                 "title": new_title,
                 "response_time_ms": response_time_ms,
                 "retrieved_count": len(matched_chunks)
