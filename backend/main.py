@@ -17,6 +17,8 @@ import time
 import json
 import base64
 import mimetypes
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 load_dotenv()
 
@@ -67,6 +69,11 @@ class UpdateConversationRequest(BaseModel):
     filename: Optional[str] = None
 
 
+class ExportReportRequest(BaseModel):
+    filename: str
+    user_id: str
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -84,13 +91,16 @@ def get_embedding(text: str) -> List[float]:
 
 
 def safe_json_value(value: Any) -> Any:
-    if pd.isna(value):
-        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
 
     if isinstance(value, pd.Timestamp):
         return value.isoformat()
 
-    if isinstance(value, (datetime,)):
+    if isinstance(value, datetime):
         return value.isoformat()
 
     if hasattr(value, "item"):
@@ -104,14 +114,9 @@ def safe_json_value(value: Any) -> Any:
 
 def clean_preview_df(df: pd.DataFrame, max_rows: int = 25, max_cols: int = 12) -> pd.DataFrame:
     preview = df.copy()
-
-    # Keep preview light
     preview = preview.iloc[:max_rows, :max_cols]
-
-    # Convert column names to string
     preview.columns = [str(col) for col in preview.columns]
 
-    # Convert datetime-like columns
     for col in preview.columns:
         try:
             if pd.api.types.is_datetime64_any_dtype(preview[col]):
@@ -140,7 +145,10 @@ def dataframe_to_preview_rows(df: pd.DataFrame, max_rows: int = 25, max_cols: in
 
 def detect_interesting_numeric_columns(df: pd.DataFrame) -> List[str]:
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    preferred_keywords = ["amount", "total", "price", "cost", "sales", "revenue", "balance", "qty", "quantity", "count", "score", "loan", "income"]
+    preferred_keywords = [
+        "amount", "total", "price", "cost", "sales", "revenue",
+        "balance", "qty", "quantity", "count", "score", "loan", "income"
+    ]
 
     ranked = []
     for col in numeric_cols:
@@ -165,7 +173,6 @@ def infer_date_columns(df: pd.DataFrame) -> List[str]:
             date_cols.append(str(col))
             continue
 
-        # Try parsing object columns carefully
         try:
             if df[col].dtype == "object":
                 sample = df[col].dropna().astype(str).head(10)
@@ -192,7 +199,6 @@ def build_spreadsheet_kpis(df: pd.DataFrame) -> Dict[str, Any]:
         {"label": "Missing Cells", "value": int(df.isna().sum().sum())},
     ]
 
-    # Add sums for interesting numeric columns
     for col in detect_interesting_numeric_columns(df)[:4]:
         series = pd.to_numeric(df[col], errors="coerce").dropna()
         if len(series) == 0:
@@ -281,11 +287,9 @@ def build_csv_or_excel_preview(filename: str, contents: bytes) -> Tuple[str, str
 
         return text, "csv", extracted_data
 
-    # Excel
     excel_file = pd.ExcelFile(io.BytesIO(contents))
     all_sheet_text = []
     sheets_preview = []
-    workbook_cards = []
     total_rows_all = 0
     total_columns_max = 0
 
@@ -631,6 +635,17 @@ def get_conversation_for_user(conversation_id: str, user_id: str) -> Optional[Di
     return convo_result.data[0] if convo_result.data else None
 
 
+def get_document_for_user(user_id: str, filename: str) -> Optional[Dict[str, Any]]:
+    result = (
+        supabase.table("documents")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("filename", filename)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
 def update_conversation_metadata(
     conversation: Dict[str, Any],
     conversation_id: str,
@@ -690,6 +705,154 @@ def upload_to_storage(user_id: str, filename: str, contents: bytes, content_type
 
     public_url = supabase.storage.from_(STORAGE_BUCKET).get_public_url(storage_path)
     return storage_path, public_url
+
+
+def build_excel_bytes_from_document(document: Dict[str, Any]) -> bytes:
+    extracted_data = document.get("extracted_data") or {}
+    preview = extracted_data.get("preview") or {}
+    structured_fields = extracted_data.get("structured_fields") or {}
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        file_type = document.get("file_type")
+
+        if file_type in ["csv", "xlsx"]:
+            sheets = preview.get("sheets") or []
+            if sheets:
+                for idx, sheet in enumerate(sheets):
+                    sheet_name = str(sheet.get("sheet_name") or f"Sheet{idx + 1}")[:31]
+                    rows = sheet.get("rows") or []
+                    df = pd.DataFrame(rows)
+                    if df.empty:
+                        df = pd.DataFrame(columns=sheet.get("columns") or [])
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+                    kpis = (sheet.get("kpis") or {}).get("cards") or []
+                    if kpis:
+                        kpi_df = pd.DataFrame(kpis)
+                        kpi_sheet_name = f"{sheet_name[:24]}_KPIs"[:31]
+                        kpi_df.to_excel(writer, sheet_name=kpi_sheet_name, index=False)
+            else:
+                pd.DataFrame([{"Message": "No spreadsheet preview found"}]).to_excel(
+                    writer, sheet_name="Report", index=False
+                )
+        else:
+            summary_rows = []
+
+            if preview.get("summary"):
+                summary_rows.append({"Field": "Summary", "Value": preview.get("summary")})
+            if preview.get("visible_text"):
+                summary_rows.append({"Field": "Visible Text", "Value": preview.get("visible_text")})
+            if preview.get("labels"):
+                summary_rows.append({"Field": "Labels", "Value": ", ".join(preview.get("labels"))})
+            if preview.get("numbers"):
+                summary_rows.append({"Field": "Numbers", "Value": ", ".join(preview.get("numbers"))})
+            if preview.get("table_like_content"):
+                summary_rows.append({"Field": "Table-like Content", "Value": preview.get("table_like_content")})
+
+            if structured_fields:
+                for key, value in structured_fields.items():
+                    if isinstance(value, list):
+                        value = ", ".join([str(v) for v in value])
+                    elif isinstance(value, dict):
+                        value = json.dumps(value)
+                    summary_rows.append({"Field": str(key), "Value": str(value)})
+
+            summary_df = pd.DataFrame(summary_rows or [{"Field": "Info", "Value": "No structured report available"}])
+            summary_df.to_excel(writer, sheet_name="Report", index=False)
+
+    output.seek(0)
+    return output.getvalue()
+
+
+def build_pdf_bytes_from_document(document: Dict[str, Any]) -> bytes:
+    extracted_data = document.get("extracted_data") or {}
+    preview = extracted_data.get("preview") or {}
+    structured_fields = extracted_data.get("structured_fields") or {}
+
+    output = io.BytesIO()
+    pdf = canvas.Canvas(output, pagesize=letter)
+    width, height = letter
+    y = height - 50
+
+    def write_line(text: str, font_size: int = 11, gap: int = 16):
+        nonlocal y
+        if y < 60:
+            pdf.showPage()
+            y = height - 50
+        pdf.setFont("Helvetica", font_size)
+        pdf.drawString(50, y, text[:110])
+        y -= gap
+
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(50, y, "AI Document Report")
+    y -= 24
+
+    write_line(f"Filename: {document.get('filename', '')}")
+    write_line(f"File Type: {document.get('file_type', '')}")
+    write_line(f"Document Type: {document.get('document_type', '')}")
+    write_line("")
+
+    file_type = document.get("file_type")
+
+    if file_type in ["csv", "xlsx"]:
+        workbook_kpis = (preview.get("workbook_kpis") or {}).get("cards") or []
+        if workbook_kpis:
+            pdf.setFont("Helvetica-Bold", 13)
+            pdf.drawString(50, y, "Workbook KPIs")
+            y -= 20
+            for card in workbook_kpis:
+                write_line(f"{card.get('label')}: {card.get('value')}")
+
+        sheets = preview.get("sheets") or []
+        for sheet in sheets[:3]:
+            if y < 120:
+                pdf.showPage()
+                y = height - 50
+            pdf.setFont("Helvetica-Bold", 13)
+            pdf.drawString(50, y, f"Sheet: {sheet.get('sheet_name')}")
+            y -= 20
+
+            for card in ((sheet.get("kpis") or {}).get("cards") or [])[:6]:
+                write_line(f"{card.get('label')}: {card.get('value')}")
+    else:
+        if preview.get("summary"):
+            pdf.setFont("Helvetica-Bold", 13)
+            pdf.drawString(50, y, "Summary")
+            y -= 20
+            write_line(str(preview.get("summary")))
+
+        if preview.get("visible_text"):
+            pdf.setFont("Helvetica-Bold", 13)
+            pdf.drawString(50, y, "Visible Text")
+            y -= 20
+            for line in str(preview.get("visible_text")).split("\n")[:12]:
+                write_line(line)
+
+        if preview.get("labels"):
+            pdf.setFont("Helvetica-Bold", 13)
+            pdf.drawString(50, y, "Labels")
+            y -= 20
+            write_line(", ".join(preview.get("labels")))
+
+    if structured_fields:
+        if y < 120:
+            pdf.showPage()
+            y = height - 50
+        pdf.setFont("Helvetica-Bold", 13)
+        pdf.drawString(50, y, "Structured Fields")
+        y -= 20
+        for key, value in list(structured_fields.items())[:15]:
+            if isinstance(value, list):
+                value = ", ".join([str(v) for v in value])
+            elif isinstance(value, dict):
+                value = json.dumps(value)
+            write_line(f"{key}: {value}")
+
+    pdf.save()
+    output.seek(0)
+    return output.getvalue()
 
 
 @app.get("/")
@@ -1210,4 +1373,52 @@ Question:
         raise
     except Exception as e:
         print("ASK STREAM ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/export-excel-report")
+def export_excel_report(request: ExportReportRequest):
+    try:
+        document = get_document_for_user(request.user_id, request.filename)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        excel_bytes = build_excel_bytes_from_document(document)
+        base_name = request.filename.rsplit(".", 1)[0] if "." in request.filename else request.filename
+
+        return StreamingResponse(
+            io.BytesIO(excel_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={base_name}_report.xlsx"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("EXPORT EXCEL ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/export-pdf-report")
+def export_pdf_report(request: ExportReportRequest):
+    try:
+        document = get_document_for_user(request.user_id, request.filename)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        pdf_bytes = build_pdf_bytes_from_document(document)
+        base_name = request.filename.rsplit(".", 1)[0] if "." in request.filename else request.filename
+
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={base_name}_report.pdf"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("EXPORT PDF ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))

@@ -9,3 +9,4 @@ numpy
 python-docx
 supabase
 openpyxl
+reportlab
