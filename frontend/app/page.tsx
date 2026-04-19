@@ -110,10 +110,6 @@ function isSpreadsheetFile(fileType?: string | null) {
   return fileType === "csv" || fileType === "xlsx";
 }
 
-function isImageFile(fileType?: string | null) {
-  return fileType === "image";
-}
-
 function detectActionIntent(text: string) {
   const lower = text.toLowerCase().trim();
 
@@ -206,11 +202,7 @@ export default function Home() {
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // Visible insights area
   const insightsRef = useRef<HTMLDivElement | null>(null);
-
-  // Always-mounted hidden export surface
   const exportSurfaceRef = useRef<HTMLDivElement | null>(null);
 
   const BACKEND_URL = "https://ai-doc-platform-24cv.onrender.com";
@@ -287,17 +279,19 @@ export default function Home() {
   };
 
   const captureExportSurface = async (): Promise<string> => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
     if (!exportSurfaceRef.current) {
+      console.error("Export surface is NULL");
       throw new Error("Export surface not ready");
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
 
     const canvas = await html2canvas(exportSurfaceRef.current, {
       scale: 2,
       useCORS: true,
       backgroundColor: "#ffffff",
-      logging: false,
+      logging: true,
+      removeContainer: true,
     });
 
     return canvas.toDataURL("image/png");
@@ -465,7 +459,7 @@ export default function Home() {
       } catch (e) {
         console.error("Auto export failed:", e);
       }
-    }, 700);
+    }, 900);
 
     return () => clearTimeout(timer);
   }, [pendingAction, loading, sortedHistory.length]);
@@ -912,7 +906,10 @@ export default function Home() {
   };
 
   const handleExportDocx = async () => {
-    if (!user?.id || !selectedDocument) return;
+    if (!user?.id || !selectedDocument || sortedHistory.length === 0) {
+      alert("Ask at least one question before exporting DOCX");
+      return;
+    }
 
     try {
       const snapshotBase64 = await captureExportSurface();
@@ -949,7 +946,10 @@ export default function Home() {
   };
 
   const handleDownloadSnapshot = async () => {
-    if (!selectedDocument) return;
+    if (!selectedDocument || sortedHistory.length === 0) {
+      alert("Ask at least one question before exporting snapshot");
+      return;
+    }
 
     try {
       const snapshotBase64 = await captureExportSurface();
@@ -1540,7 +1540,6 @@ export default function Home() {
             </div>
           </section>
 
-          {/* Always-mounted hidden export surface */}
           <div
             style={{
               position: "fixed",
@@ -1552,7 +1551,11 @@ export default function Home() {
               padding: "24px",
             }}
           >
-            <div ref={exportSurfaceRef} className="rounded-2xl border border-gray-200 bg-white p-6 text-gray-900">
+            <div
+              ref={exportSurfaceRef}
+              style={{ minHeight: "400px" }}
+              className="rounded-2xl border border-gray-200 bg-white p-6 text-gray-900"
+            >
               <div className="mb-6 flex items-start justify-between">
                 <div>
                   <h2 className="text-2xl font-bold">AI Document Report</h2>
