@@ -144,6 +144,25 @@ function detectActionIntent(text: string) {
   return null;
 }
 
+function getSavedConversationKey(userId: string) {
+  return `last_conversation_id_${userId}`;
+}
+
+function saveLastConversationId(userId: string, conversationId: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(getSavedConversationKey(userId), conversationId);
+}
+
+function loadLastConversationId(userId: string) {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(getSavedConversationKey(userId)) || "";
+}
+
+function clearLastConversationId(userId: string) {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(getSavedConversationKey(userId));
+}
+
 export default function Home() {
   const { isSignedIn, user } = useUser();
 
@@ -312,30 +331,47 @@ export default function Home() {
       if (convos.length === 0) {
         setActiveConversationId("");
         setHistory([]);
+        clearLastConversationId(user.id);
         return [];
       }
+
+      let targetConversationId = "";
 
       if (preferredConversationId) {
         const preferred = convos.find((c) => c.id === preferredConversationId);
         if (preferred) {
-          setActiveConversationId(preferred.id);
-          setSelectedDocument(preferred.filename || "");
-          await fetchHistory(preferred.id);
-          return convos;
+          targetConversationId = preferred.id;
         }
       }
 
-      if (preserveActive && activeConversationId) {
-        const existing = convos.find((c) => c.id === activeConversationId);
-        if (existing) return convos;
+      if (!targetConversationId && preserveActive && activeConversationId) {
+        const existingActive = convos.find((c) => c.id === activeConversationId);
+        if (existingActive) {
+          targetConversationId = existingActive.id;
+        }
       }
 
-      if (!activeConversationId || !preserveActive) {
-        const first = convos[0];
-        setActiveConversationId(first.id);
-        setSelectedDocument(first.filename || "");
-        await fetchHistory(first.id);
+      if (!targetConversationId) {
+        const savedConversationId = loadLastConversationId(user.id);
+        if (savedConversationId) {
+          const savedConversation = convos.find((c) => c.id === savedConversationId);
+          if (savedConversation) {
+            targetConversationId = savedConversation.id;
+          }
+        }
       }
+
+      if (!targetConversationId) {
+        targetConversationId = convos[0].id;
+      }
+
+      const targetConversation =
+        convos.find((c) => c.id === targetConversationId) || convos[0];
+
+      setActiveConversationId(targetConversation.id);
+      setSelectedDocument(targetConversation.filename || "");
+      saveLastConversationId(user.id, targetConversation.id);
+      await fetchHistory(targetConversation.id);
 
       return convos;
     } catch (error) {
@@ -357,12 +393,8 @@ export default function Home() {
 
     if (isSignedIn && user?.id) {
       const init = async () => {
-        const docs = await fetchDocuments();
-        const convos = await fetchConversations();
-
-        if ((!convos || convos.length === 0) && docs && docs.length > 0) {
-          setSelectedDocument(docs[0].filename);
-        }
+        await fetchDocuments();
+        await fetchConversations(undefined, true);
       };
 
       init();
@@ -400,16 +432,14 @@ export default function Home() {
 
         setActiveConversationId(newConversation.id);
         setSelectedDocument(newConversation.filename || filename || "");
-        setConversations((prev) => {
-          const exists = prev.some((c) => c.id === newConversation.id);
-          return exists ? prev : [newConversation, ...prev];
-        });
         setHistory([]);
         setQuestion("");
         setAnswer("");
         setDisplayedAnswer("");
         setShareLink("");
         setPendingAction(null);
+
+        saveLastConversationId(user.id, newConversation.id);
 
         await fetchConversations(searchText || undefined, true, newConversation.id);
 
@@ -462,17 +492,8 @@ export default function Home() {
       setFile(null);
 
       await fetchDocuments();
+
       setSelectedDocument(uploadedFilename);
-
-      setQuestion("");
-      setAnswer("");
-      setDisplayedAnswer("");
-      setShareLink("");
-      setPendingAction(null);
-
-      setActiveConversationId("");
-      setHistory([]);
-
       await fetchConversations(searchText || undefined, true);
     } catch (error) {
       console.error("Upload failed:", error);
@@ -626,6 +647,7 @@ export default function Home() {
     setDisplayedAnswer("");
     setShareLink("");
     setPendingAction(null);
+    saveLastConversationId(user!.id, conversation.id);
     await fetchHistory(conversation.id);
   };
 
@@ -639,7 +661,6 @@ export default function Home() {
     setSelectedSheetIndex(0);
 
     if (!filename) {
-      setShowInsights(false);
       return;
     }
 
@@ -649,10 +670,8 @@ export default function Home() {
 
     if (matchingConversation) {
       setActiveConversationId(matchingConversation.id);
+      saveLastConversationId(user!.id, matchingConversation.id);
       await fetchHistory(matchingConversation.id);
-    } else {
-      setActiveConversationId("");
-      setHistory([]);
     }
   };
 
@@ -667,9 +686,12 @@ export default function Home() {
     setDisplayedAnswer("");
     setShareLink("");
     setPendingAction(null);
-    setHistory([]);
 
-    await createNewConversation(selectedDocument);
+    const created = await createNewConversation(selectedDocument);
+
+    if (created?.id && user?.id) {
+      saveLastConversationId(user.id, created.id);
+    }
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
@@ -678,30 +700,17 @@ export default function Home() {
         method: "DELETE",
       });
 
-      if (activeConversationId === conversationId) {
-        setActiveConversationId("");
-        setHistory([]);
-        setQuestion("");
-        setAnswer("");
-        setDisplayedAnswer("");
-        setShareLink("");
-        setPendingAction(null);
-      }
+      const updatedConvos = await fetchConversations(searchText || undefined, false);
 
-      const updatedConvos = await fetchConversations(
-        searchText || undefined,
-        false,
-        undefined
-      );
-
-      if (updatedConvos.length > 0) {
-        const first = updatedConvos[0];
-        setActiveConversationId(first.id);
-        setSelectedDocument(first.filename || selectedDocument || "");
-        await fetchHistory(first.id);
-      } else {
-        setActiveConversationId("");
-        setHistory([]);
+      if (user?.id) {
+        const currentSaved = loadLastConversationId(user.id);
+        if (currentSaved === conversationId) {
+          if (updatedConvos.length > 0) {
+            saveLastConversationId(user.id, updatedConvos[0].id);
+          } else {
+            clearLastConversationId(user.id);
+          }
+        }
       }
     } catch (error) {
       console.error("Failed to delete conversation:", error);
@@ -778,14 +787,6 @@ export default function Home() {
       );
 
       if (res.ok) {
-        setActiveConversationId("");
-        setHistory([]);
-        setQuestion("");
-        setAnswer("");
-        setDisplayedAnswer("");
-        setShareLink("");
-        setPendingAction(null);
-
         const docs = await fetchDocuments();
         const remainingDocs = (docs || []).filter(
           (d: DocumentItem) => d.filename !== deletedDocument
@@ -799,6 +800,8 @@ export default function Home() {
           setSelectedDocument("");
           setConversations([]);
           setHistory([]);
+          setActiveConversationId("");
+          clearLastConversationId(user.id);
         }
       }
     } catch (error) {
@@ -1194,7 +1197,9 @@ export default function Home() {
                     ) : (
                       <div className="space-y-4 text-xs">
                         <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3">
-                          <div className="mb-2 text-sm font-medium text-gray-800">Client-ready exports</div>
+                          <div className="mb-2 text-sm font-medium text-gray-800">
+                            Client-ready exports
+                          </div>
 
                           <div className="grid grid-cols-2 gap-2">
                             <button
@@ -1259,15 +1264,18 @@ export default function Home() {
                                 </div>
                                 <div>
                                   <span className="font-semibold">Labels:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.labels?.join(", ") || "—"}
+                                  {selectedDocumentMeta.extracted_data.preview.labels?.join(", ") ||
+                                    "—"}
                                 </div>
                                 <div>
                                   <span className="font-semibold">Numbers:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.numbers?.join(", ") || "—"}
+                                  {selectedDocumentMeta.extracted_data.preview.numbers?.join(", ") ||
+                                    "—"}
                                 </div>
                                 <div>
                                   <span className="font-semibold">Table-like Content:</span>{" "}
-                                  {selectedDocumentMeta.extracted_data.preview.table_like_content || "—"}
+                                  {selectedDocumentMeta.extracted_data.preview
+                                    .table_like_content || "—"}
                                 </div>
                               </div>
                             </div>
@@ -1285,7 +1293,9 @@ export default function Home() {
                                       key={`${card.label}-${index}`}
                                       className="rounded-lg border border-gray-200 bg-white p-3"
                                     >
-                                      <div className="text-[11px] text-gray-500">{card.label}</div>
+                                      <div className="text-[11px] text-gray-500">
+                                        {card.label}
+                                      </div>
                                       <div className="mt-1 text-sm font-semibold text-gray-900">
                                         {card.value}
                                       </div>
@@ -1356,10 +1366,18 @@ export default function Home() {
                                         </thead>
                                         <tbody>
                                           {selectedSheet.rows.map((row, rowIndex) => (
-                                            <tr key={rowIndex} className="border-b border-gray-100 last:border-b-0">
+                                            <tr
+                                              key={rowIndex}
+                                              className="border-b border-gray-100 last:border-b-0"
+                                            >
                                               {selectedSheet.columns.map((col) => (
-                                                <td key={`${rowIndex}-${col}`} className="px-3 py-2 text-gray-900">
-                                                  {row[col] === null || row[col] === undefined || row[col] === ""
+                                                <td
+                                                  key={`${rowIndex}-${col}`}
+                                                  className="px-3 py-2 text-gray-900"
+                                                >
+                                                  {row[col] === null ||
+                                                  row[col] === undefined ||
+                                                  row[col] === ""
                                                     ? "—"
                                                     : String(row[col])}
                                                 </td>
@@ -1377,17 +1395,23 @@ export default function Home() {
                                         Numeric Summary
                                       </div>
                                       <div className="space-y-2">
-                                        {selectedSheet.kpis.numeric_summaries.map((item, index) => (
-                                          <div
-                                            key={`${item.column}-${index}`}
-                                            className="rounded-lg border border-gray-200 bg-white p-3"
-                                          >
-                                            <div className="font-medium text-gray-800">{item.column}</div>
-                                            <div className="mt-1 text-gray-600">
-                                              Count: {item.count} | Sum: {item.sum} | Avg: {item.average} | Min: {item.min} | Max: {item.max}
+                                        {selectedSheet.kpis.numeric_summaries.map(
+                                          (item, index) => (
+                                            <div
+                                              key={`${item.column}-${index}`}
+                                              className="rounded-lg border border-gray-200 bg-white p-3"
+                                            >
+                                              <div className="font-medium text-gray-800">
+                                                {item.column}
+                                              </div>
+                                              <div className="mt-1 text-gray-600">
+                                                Count: {item.count} | Sum: {item.sum} | Avg:{" "}
+                                                {item.average} | Min: {item.min} | Max:{" "}
+                                                {item.max}
+                                              </div>
                                             </div>
-                                          </div>
-                                        ))}
+                                          )
+                                        )}
                                       </div>
                                     </div>
                                   )}
@@ -1398,17 +1422,22 @@ export default function Home() {
                                         Column Profiles
                                       </div>
                                       <div className="space-y-2">
-                                        {selectedSheet.kpis.column_profiles.map((item, index) => (
-                                          <div
-                                            key={`${item.column}-${index}`}
-                                            className="rounded-lg border border-gray-200 bg-white p-3"
-                                          >
-                                            <div className="font-medium text-gray-800">{item.column}</div>
-                                            <div className="mt-1 text-gray-600">
-                                              Type: {item.dtype} | Non-null: {item.non_null} | Nulls: {item.nulls} | Unique: {item.unique}
+                                        {selectedSheet.kpis.column_profiles.map(
+                                          (item, index) => (
+                                            <div
+                                              key={`${item.column}-${index}`}
+                                              className="rounded-lg border border-gray-200 bg-white p-3"
+                                            >
+                                              <div className="font-medium text-gray-800">
+                                                {item.column}
+                                              </div>
+                                              <div className="mt-1 text-gray-600">
+                                                Type: {item.dtype} | Non-null: {item.non_null} |
+                                                Nulls: {item.nulls} | Unique: {item.unique}
+                                              </div>
                                             </div>
-                                          </div>
-                                        ))}
+                                          )
+                                        )}
                                       </div>
                                     </div>
                                   )}
@@ -1421,7 +1450,9 @@ export default function Home() {
                           <div className="font-medium text-gray-700">Structured Fields</div>
                           <div className="mt-1 rounded-lg border border-gray-200 bg-white p-3">
                             {structuredEntries.length === 0 ? (
-                              <div className="text-gray-500">No structured fields available.</div>
+                              <div className="text-gray-500">
+                                No structured fields available.
+                              </div>
                             ) : (
                               <div className="space-y-2">
                                 {structuredEntries.map(([key, value]) => (
