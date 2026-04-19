@@ -599,12 +599,7 @@ Document text:
         return {"raw_extraction": raw}
 
 
-def get_relevant_chunks(
-    user_id: str,
-    filename: str,
-    question: str,
-    match_count: int = 3
-) -> List[Dict[str, Any]]:
+def get_relevant_chunks(user_id: str, filename: str, question: str, match_count: int = 3) -> List[Dict[str, Any]]:
     query_embedding = get_embedding(question)
 
     result = supabase.rpc(
@@ -773,7 +768,7 @@ def build_pdf_bytes_from_document(document: Dict[str, Any]) -> bytes:
 
     output = io.BytesIO()
     pdf = canvas.Canvas(output, pagesize=letter)
-    width, height = letter
+    _, height = letter
     y = height - 50
 
     def write_line(text: str, font_size: int = 11, gap: int = 16):
@@ -855,6 +850,77 @@ def build_pdf_bytes_from_document(document: Dict[str, Any]) -> bytes:
     return output.getvalue()
 
 
+def build_docx_bytes_from_document(document: Dict[str, Any]) -> bytes:
+    extracted_data = document.get("extracted_data") or {}
+    preview = extracted_data.get("preview") or {}
+    structured_fields = extracted_data.get("structured_fields") or {}
+
+    doc = Document()
+    doc.add_heading("AI Document Report", level=1)
+    doc.add_paragraph(f"Filename: {document.get('filename', '')}")
+    doc.add_paragraph(f"File Type: {document.get('file_type', '')}")
+    doc.add_paragraph(f"Document Type: {document.get('document_type', '')}")
+
+    file_type = document.get("file_type")
+
+    if file_type in ["csv", "xlsx"]:
+        workbook_kpis = (preview.get("workbook_kpis") or {}).get("cards") or []
+        if workbook_kpis:
+            doc.add_heading("Workbook KPIs", level=2)
+            for card in workbook_kpis:
+                doc.add_paragraph(f"{card.get('label')}: {card.get('value')}")
+
+        sheets = preview.get("sheets") or []
+        for sheet in sheets[:3]:
+            doc.add_heading(f"Sheet: {sheet.get('sheet_name')}", level=2)
+
+            cards = ((sheet.get("kpis") or {}).get("cards") or [])[:8]
+            if cards:
+                for card in cards:
+                    doc.add_paragraph(f"{card.get('label')}: {card.get('value')}")
+
+            rows = (sheet.get("rows") or [])[:8]
+            cols = sheet.get("columns") or []
+
+            if rows and cols:
+                table = doc.add_table(rows=1, cols=len(cols))
+                table.style = "Table Grid"
+                hdr_cells = table.rows[0].cells
+                for i, col in enumerate(cols):
+                    hdr_cells[i].text = str(col)
+
+                for row in rows:
+                    row_cells = table.add_row().cells
+                    for i, col in enumerate(cols):
+                        val = row.get(col, "")
+                        row_cells[i].text = "" if val is None else str(val)
+    else:
+        doc.add_heading("Summary", level=2)
+        doc.add_paragraph(str(preview.get("summary") or "No summary available"))
+
+        if preview.get("visible_text"):
+            doc.add_heading("Visible Text", level=2)
+            doc.add_paragraph(str(preview.get("visible_text")))
+
+        if preview.get("labels"):
+            doc.add_heading("Labels", level=2)
+            doc.add_paragraph(", ".join(preview.get("labels")))
+
+    if structured_fields:
+        doc.add_heading("Structured Fields", level=2)
+        for key, value in structured_fields.items():
+            if isinstance(value, list):
+                value = ", ".join([str(v) for v in value])
+            elif isinstance(value, dict):
+                value = json.dumps(value)
+            doc.add_paragraph(f"{key}: {value}")
+
+    output = io.BytesIO()
+    doc.save(output)
+    output.seek(0)
+    return output.getvalue()
+
+
 @app.get("/")
 def root():
     return {"status": "ok"}
@@ -924,11 +990,7 @@ def delete_document(user_id: str, filename: str):
 
 
 @app.get("/conversations/{user_id}")
-def get_conversations(
-    user_id: str,
-    filename: Optional[str] = None,
-    search: Optional[str] = None,
-):
+def get_conversations(user_id: str, filename: Optional[str] = None, search: Optional[str] = None):
     try:
         query = (
             supabase.table("conversations")
@@ -1088,10 +1150,7 @@ def get_chat_history(conversation_id: str):
 
 
 @app.post("/upload")
-async def upload_file(
-    file: UploadFile = File(...),
-    user_id: str = Form(...)
-):
+async def upload_file(file: UploadFile = File(...), user_id: str = Form(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file")
 
@@ -1174,26 +1233,17 @@ def ask_ai(request: AskRequest):
 
     try:
         if not request.conversation_id:
-            return {
-                "answer": "No active conversation selected.",
-                "saved_to_supabase": False
-            }
+            return {"answer": "No active conversation selected.", "saved_to_supabase": False}
 
         conversation = get_conversation_for_user(request.conversation_id, request.user_id)
 
         if not conversation:
-            return {
-                "answer": "Conversation not found.",
-                "saved_to_supabase": False
-            }
+            return {"answer": "Conversation not found.", "saved_to_supabase": False}
 
         selected_filename = request.filename or conversation.get("filename")
 
         if not selected_filename:
-            return {
-                "answer": "No document selected for this conversation.",
-                "saved_to_supabase": False
-            }
+            return {"answer": "No document selected for this conversation.", "saved_to_supabase": False}
 
         matched_chunks = get_relevant_chunks(
             request.user_id,
@@ -1218,8 +1268,8 @@ You are inside an AI document platform.
 Answer using only this context.
 
 Important:
-- If the user asks to export or create a PDF, Excel, or snapshot, do NOT say you cannot do it.
-- Instead, briefly say that the export can be done using the platform action button.
+- If the user asks to export or create a PDF, Excel, DOCX/Word, or snapshot, do NOT say you cannot do it.
+- Instead, briefly say that the export can be done using the platform action.
 - Keep the answer short and helpful.
 
 Context:
@@ -1273,10 +1323,7 @@ Question:
 
     except Exception as e:
         print("ASK ERROR:", str(e))
-        return {
-            "answer": f"Error: {str(e)}",
-            "saved_to_supabase": False
-        }
+        return {"answer": f"Error: {str(e)}", "saved_to_supabase": False}
 
 
 @app.post("/ask-stream")
@@ -1305,10 +1352,7 @@ def ask_ai_stream(request: AskRequest):
         )
 
         if not matched_chunks:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No stored chunks found for '{selected_filename}'. Please upload it again."
-            )
+            raise HTTPException(status_code=404, detail=f"No stored chunks found for '{selected_filename}'. Please upload it again.")
 
         context = build_context_from_chunks(matched_chunks)
 
@@ -1323,8 +1367,8 @@ You are inside an AI document platform.
 Answer using only this context.
 
 Important:
-- If the user asks to export or create a PDF, Excel, or snapshot, do NOT say you cannot do it.
-- Instead, briefly say that the export can be done using the platform action button.
+- If the user asks to export or create a PDF, Excel, DOCX/Word, or snapshot, do NOT say you cannot do it.
+- Instead, briefly say that the export can be done using the platform action.
 - Keep the answer short and helpful.
 
 Context:
@@ -1405,9 +1449,7 @@ def export_excel_report(request: ExportReportRequest):
         return StreamingResponse(
             io.BytesIO(excel_bytes),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f"attachment; filename={base_name}_report.xlsx"
-            }
+            headers={"Content-Disposition": f"attachment; filename={base_name}_report.xlsx"}
         )
     except HTTPException:
         raise
@@ -1429,12 +1471,32 @@ def export_pdf_report(request: ExportReportRequest):
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename={base_name}_report.pdf"
-            }
+            headers={"Content-Disposition": f"attachment; filename={base_name}_report.pdf"}
         )
     except HTTPException:
         raise
     except Exception as e:
         print("EXPORT PDF ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/export-docx-report")
+def export_docx_report(request: ExportReportRequest):
+    try:
+        document = get_document_for_user(request.user_id, request.filename)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        docx_bytes = build_docx_bytes_from_document(document)
+        base_name = request.filename.rsplit(".", 1)[0] if "." in request.filename else request.filename
+
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={base_name}_report.docx"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("EXPORT DOCX ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
