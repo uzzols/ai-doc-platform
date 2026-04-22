@@ -83,6 +83,33 @@ type ConversationItem = {
   share_token?: string | null;
 };
 
+type LoanRiskForm = {
+  Age: string;
+  Income: string;
+  LoanAmount: string;
+  CreditScore: string;
+  MonthsEmployed: string;
+  NumCreditLines: string;
+  InterestRate: string;
+  LoanTerm: string;
+  DTIRatio: string;
+  Education: string;
+  EmploymentType: string;
+  MaritalStatus: string;
+  HasMortgage: string;
+  HasDependents: string;
+  LoanPurpose: string;
+  HasCoSigner: string;
+};
+
+type LoanRiskResult = {
+  prediction: number;
+  default_risk_probability?: number;
+  risk_level?: string;
+  explanation?: string;
+  error?: string;
+};
+
 function LoadingDots() {
   return (
     <div className="flex items-center gap-1">
@@ -197,6 +224,27 @@ export default function Home() {
   const [selectedDocument, setSelectedDocument] = useState("");
   const [activeConversationId, setActiveConversationId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const [loanRiskLoading, setLoanRiskLoading] = useState(false);
+  const [loanRiskResult, setLoanRiskResult] = useState<LoanRiskResult | null>(null);
+  const [loanRiskForm, setLoanRiskForm] = useState<LoanRiskForm>({
+    Age: "35",
+    Income: "55000",
+    LoanAmount: "200000",
+    CreditScore: "680",
+    MonthsEmployed: "60",
+    NumCreditLines: "5",
+    InterestRate: "7.5",
+    LoanTerm: "36",
+    DTIRatio: "28",
+    Education: "Bachelor's",
+    EmploymentType: "Full-time",
+    MaritalStatus: "Married",
+    HasMortgage: "Yes",
+    HasDependents: "Yes",
+    LoanPurpose: "Home",
+    HasCoSigner: "No",
+  });
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -693,6 +741,60 @@ export default function Home() {
       setAnswer(errorMessage);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoanRiskPredict = async () => {
+    try {
+      setLoanRiskLoading(true);
+      setLoanRiskResult(null);
+
+      const payload = {
+        Age: Number(loanRiskForm.Age),
+        Income: Number(loanRiskForm.Income),
+        LoanAmount: Number(loanRiskForm.LoanAmount),
+        CreditScore: Number(loanRiskForm.CreditScore),
+        MonthsEmployed: Number(loanRiskForm.MonthsEmployed),
+        NumCreditLines: Number(loanRiskForm.NumCreditLines),
+        InterestRate: Number(loanRiskForm.InterestRate),
+        LoanTerm: Number(loanRiskForm.LoanTerm),
+        DTIRatio: Number(loanRiskForm.DTIRatio),
+        Education: loanRiskForm.Education,
+        EmploymentType: loanRiskForm.EmploymentType,
+        MaritalStatus: loanRiskForm.MaritalStatus,
+        HasMortgage: loanRiskForm.HasMortgage,
+        HasDependents: loanRiskForm.HasDependents,
+        LoanPurpose: loanRiskForm.LoanPurpose,
+        HasCoSigner: loanRiskForm.HasCoSigner,
+      };
+
+      const res = await fetch(`${BACKEND_URL}/loan-risk`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setLoanRiskResult({
+          prediction: -1,
+          error: data?.detail || data?.error || "Prediction failed",
+        });
+        return;
+      }
+
+      setLoanRiskResult(data);
+    } catch (error) {
+      console.error("Loan risk prediction failed:", error);
+      setLoanRiskResult({
+        prediction: -1,
+        error: "Loan risk prediction failed",
+      });
+    } finally {
+      setLoanRiskLoading(false);
     }
   };
 
@@ -1397,6 +1499,216 @@ export default function Home() {
                               ))}
                             </div>
                           </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-3 text-sm font-medium text-gray-800">
+                  Loan Risk Predictor
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={loanRiskForm.Age}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, Age: e.target.value }))
+                    }
+                    placeholder="Age"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.Income}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, Income: e.target.value }))
+                    }
+                    placeholder="Income"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.LoanAmount}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, LoanAmount: e.target.value }))
+                    }
+                    placeholder="Loan Amount"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.CreditScore}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, CreditScore: e.target.value }))
+                    }
+                    placeholder="Credit Score"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.MonthsEmployed}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, MonthsEmployed: e.target.value }))
+                    }
+                    placeholder="Months Employed"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.NumCreditLines}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, NumCreditLines: e.target.value }))
+                    }
+                    placeholder="Credit Lines"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.InterestRate}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, InterestRate: e.target.value }))
+                    }
+                    placeholder="Interest Rate"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                  <input
+                    value={loanRiskForm.LoanTerm}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, LoanTerm: e.target.value }))
+                    }
+                    placeholder="Loan Term"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  />
+                </div>
+
+                <input
+                  value={loanRiskForm.DTIRatio}
+                  onChange={(e) =>
+                    setLoanRiskForm((prev) => ({ ...prev, DTIRatio: e.target.value }))
+                  }
+                  placeholder="DTI Ratio"
+                  className="mt-2 w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                />
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <select
+                    value={loanRiskForm.Education}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, Education: e.target.value }))
+                    }
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>High School</option>
+                    <option>Bachelor's</option>
+                    <option>Master's</option>
+                    <option>PhD</option>
+                  </select>
+
+                  <select
+                    value={loanRiskForm.EmploymentType}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, EmploymentType: e.target.value }))
+                    }
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>Full-time</option>
+                    <option>Part-time</option>
+                    <option>Self-employed</option>
+                    <option>Unemployed</option>
+                  </select>
+
+                  <select
+                    value={loanRiskForm.MaritalStatus}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, MaritalStatus: e.target.value }))
+                    }
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>Single</option>
+                    <option>Married</option>
+                    <option>Divorced</option>
+                  </select>
+
+                  <select
+                    value={loanRiskForm.HasMortgage}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, HasMortgage: e.target.value }))
+                    }
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>Yes</option>
+                    <option>No</option>
+                  </select>
+
+                  <select
+                    value={loanRiskForm.HasDependents}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, HasDependents: e.target.value }))
+                    }
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>Yes</option>
+                    <option>No</option>
+                  </select>
+
+                  <select
+                    value={loanRiskForm.HasCoSigner}
+                    onChange={(e) =>
+                      setLoanRiskForm((prev) => ({ ...prev, HasCoSigner: e.target.value }))
+                    }
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>Yes</option>
+                    <option>No</option>
+                  </select>
+                </div>
+
+                <select
+                  value={loanRiskForm.LoanPurpose}
+                  onChange={(e) =>
+                    setLoanRiskForm((prev) => ({ ...prev, LoanPurpose: e.target.value }))
+                  }
+                  className="mt-2 w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                >
+                  <option>Home</option>
+                  <option>Business</option>
+                  <option>Education</option>
+                  <option>Auto</option>
+                  <option>Other</option>
+                </select>
+
+                <button
+                  onClick={handleLoanRiskPredict}
+                  disabled={loanRiskLoading}
+                  className="mt-3 w-full rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {loanRiskLoading ? "Predicting..." : "Predict Loan Risk"}
+                </button>
+
+                {loanRiskResult && (
+                  <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
+                    {loanRiskResult.error ? (
+                      <p className="text-red-600">{loanRiskResult.error}</p>
+                    ) : (
+                      <div className="space-y-1">
+                        <p>
+                          <span className="font-medium">Prediction:</span>{" "}
+                          {loanRiskResult.prediction === 1 ? "Default Risk" : "Low Risk"}
+                        </p>
+
+                        {typeof loanRiskResult.default_risk_probability === "number" && (
+                          <p>
+                            <span className="font-medium">Probability:</span>{" "}
+                            {(loanRiskResult.default_risk_probability * 100).toFixed(2)}%
+                          </p>
+                        )}
+
+                        {loanRiskResult.risk_level && (
+                          <p>
+                            <span className="font-medium">Risk Level:</span>{" "}
+                            {loanRiskResult.risk_level}
+                          </p>
+                        )}
+
+                        {loanRiskResult.explanation && (
+                          <p className="text-gray-600">{loanRiskResult.explanation}</p>
                         )}
                       </div>
                     )}
