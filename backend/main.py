@@ -11,6 +11,7 @@ import pandas as pd
 import io
 import fitz
 import os
+import requests
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
 import uuid
@@ -30,6 +31,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "uploads")
+ML_API_URL = os.getenv("ML_API_URL")
 
 if not OPENAI_API_KEY:
     raise ValueError("Missing OPENAI_API_KEY")
@@ -80,6 +82,25 @@ class ExportDocxWithSnapshotRequest(BaseModel):
     user_id: str
     conversation_id: Optional[str] = None
     snapshot_base64: Optional[str] = None
+
+
+class LoanApplication(BaseModel):
+    Age: float
+    Income: float
+    LoanAmount: float
+    CreditScore: float
+    MonthsEmployed: float
+    NumCreditLines: float
+    InterestRate: float
+    LoanTerm: float
+    DTIRatio: float
+    Education: str
+    EmploymentType: str
+    MaritalStatus: str
+    HasMortgage: str
+    HasDependents: str
+    LoanPurpose: str
+    HasCoSigner: str
 
 
 def utc_now_iso() -> str:
@@ -991,6 +1012,24 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/loan-risk")
+def get_loan_risk(data: LoanApplication):
+    if not ML_API_URL:
+        raise HTTPException(status_code=500, detail="ML_API_URL is not configured")
+
+    try:
+        response = requests.post(
+            f"{ML_API_URL}/predict",
+            json=data.dict(),
+            timeout=30
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print("LOAN RISK API ERROR:", str(e))
+        raise HTTPException(status_code=502, detail=f"ML API request failed: {str(e)}")
 
 
 @app.get("/documents/{user_id}")
