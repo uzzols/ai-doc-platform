@@ -227,14 +227,14 @@ function validateLoanRiskForm(form: LoanRiskForm): LoanRiskErrors {
     max?: number;
   }> = [
     { key: "Age", label: "Age", min: 18, max: 100 },
-    { key: "Income", label: "Income", min: 1, max: 10000000 },
+    { key: "Income", label: "Annual Income", min: 1, max: 10000000 },
     { key: "LoanAmount", label: "Loan Amount", min: 1, max: 100000000 },
     { key: "CreditScore", label: "Credit Score", min: 300, max: 850 },
     { key: "MonthsEmployed", label: "Months Employed", min: 0, max: 600 },
     { key: "NumCreditLines", label: "Number of Credit Lines", min: 0, max: 100 },
     { key: "InterestRate", label: "Interest Rate", min: 0, max: 100 },
     { key: "LoanTerm", label: "Loan Term", min: 1, max: 600 },
-    { key: "DTIRatio", label: "DTI Ratio", min: 0, max: 100 },
+    { key: "DTIRatio", label: "Debt-to-Income Ratio", min: 0, max: 100 },
   ];
 
   for (const field of numericChecks) {
@@ -263,11 +263,11 @@ function validateLoanRiskForm(form: LoanRiskForm): LoanRiskErrors {
   const loanAmount = Number(cleanNumericInput(form.LoanAmount));
 
   if (!errors.Income && income > 0 && income < 1000) {
-    errors.Income = "Income looks too small. Use annual USD, e.g. 55000";
+    errors.Income = "Use annual income in USD, e.g. 55000";
   }
 
   if (!errors.LoanAmount && loanAmount > 0 && loanAmount < 1000) {
-    errors.LoanAmount = "Loan amount looks too small. Use full USD, e.g. 200000";
+    errors.LoanAmount = "Use full loan amount in USD, e.g. 200000";
   }
 
   return errors;
@@ -1220,10 +1220,16 @@ export default function Home() {
 
   const renderLoanInput = (
     field: keyof LoanRiskForm,
+    label: string,
     placeholder: string,
+    helperText?: string,
     error?: string
   ) => (
     <div>
+      <label className="mb-1 block text-[11px] font-medium text-gray-600">
+        {label}
+      </label>
+
       <input
         value={loanRiskForm[field]}
         onChange={(e) => handleLoanRiskNumberChange(field, e.target.value)}
@@ -1233,6 +1239,11 @@ export default function Home() {
           error ? "border-red-400" : "border-gray-200"
         }`}
       />
+
+      {helperText && !error && (
+        <p className="mt-1 text-[11px] text-gray-500">{helperText}</p>
+      )}
+
       {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
     </div>
   );
@@ -1658,92 +1669,175 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  {renderLoanInput("Age", "Age", loanRiskErrors.Age)}
-                  {renderLoanInput("Income", "Income (Annual USD)", loanRiskErrors.Income)}
-                  {renderLoanInput("LoanAmount", "Loan Amount (USD)", loanRiskErrors.LoanAmount)}
-                  {renderLoanInput("CreditScore", "Credit Score (300-850)", loanRiskErrors.CreditScore)}
-                  {renderLoanInput("MonthsEmployed", "Months Employed", loanRiskErrors.MonthsEmployed)}
-                  {renderLoanInput("NumCreditLines", "Credit Lines", loanRiskErrors.NumCreditLines)}
-                  {renderLoanInput("InterestRate", "Interest Rate (%)", loanRiskErrors.InterestRate)}
-                  {renderLoanInput("LoanTerm", "Loan Term (Months)", loanRiskErrors.LoanTerm)}
+                  {renderLoanInput("Age", "Age (years)", "e.g. 35", undefined, loanRiskErrors.Age)}
+                  {renderLoanInput(
+                    "Income",
+                    "Annual Income (USD)",
+                    "e.g. 55000",
+                    "Use yearly income, not monthly",
+                    loanRiskErrors.Income
+                  )}
+                  {renderLoanInput(
+                    "LoanAmount",
+                    "Loan Amount (USD)",
+                    "e.g. 200000",
+                    "Enter full loan value in USD",
+                    loanRiskErrors.LoanAmount
+                  )}
+                  {renderLoanInput(
+                    "CreditScore",
+                    "Credit Score (300–850)",
+                    "e.g. 680",
+                    undefined,
+                    loanRiskErrors.CreditScore
+                  )}
+                  {renderLoanInput(
+                    "MonthsEmployed",
+                    "Months Employed",
+                    "e.g. 60",
+                    "Total months at current job",
+                    loanRiskErrors.MonthsEmployed
+                  )}
+                  {renderLoanInput(
+                    "NumCreditLines",
+                    "Number of Credit Lines",
+                    "e.g. 5",
+                    undefined,
+                    loanRiskErrors.NumCreditLines
+                  )}
+                  {renderLoanInput(
+                    "InterestRate",
+                    "Interest Rate (%)",
+                    "e.g. 7.5",
+                    "Enter percentage value",
+                    loanRiskErrors.InterestRate
+                  )}
+                  {renderLoanInput(
+                    "LoanTerm",
+                    "Loan Term (Months)",
+                    "e.g. 36",
+                    "Total duration of loan",
+                    loanRiskErrors.LoanTerm
+                  )}
                 </div>
 
                 <div className="mt-2">
-                  {renderLoanInput("DTIRatio", "DTI Ratio (%)", loanRiskErrors.DTIRatio)}
+                  {renderLoanInput(
+                    "DTIRatio",
+                    "Debt-to-Income Ratio (%)",
+                    "e.g. 28",
+                    "Monthly debt vs income percentage",
+                    loanRiskErrors.DTIRatio
+                  )}
                 </div>
 
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <select
-                    value={loanRiskForm.Education}
-                    onChange={(e) => handleLoanRiskSelectChange("Education", e.target.value)}
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                  >
-                    <option>High School</option>
-                    <option>Bachelor's</option>
-                    <option>Master's</option>
-                    <option>PhD</option>
-                  </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                      Education Level
+                    </label>
+                    <select
+                      value={loanRiskForm.Education}
+                      onChange={(e) => handleLoanRiskSelectChange("Education", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                    >
+                      <option>High School</option>
+                      <option>Bachelor's</option>
+                      <option>Master's</option>
+                      <option>PhD</option>
+                    </select>
+                  </div>
 
-                  <select
-                    value={loanRiskForm.EmploymentType}
-                    onChange={(e) => handleLoanRiskSelectChange("EmploymentType", e.target.value)}
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                  >
-                    <option>Full-time</option>
-                    <option>Part-time</option>
-                    <option>Self-employed</option>
-                    <option>Unemployed</option>
-                  </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                      Employment Type
+                    </label>
+                    <select
+                      value={loanRiskForm.EmploymentType}
+                      onChange={(e) => handleLoanRiskSelectChange("EmploymentType", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                    >
+                      <option>Full-time</option>
+                      <option>Part-time</option>
+                      <option>Self-employed</option>
+                      <option>Unemployed</option>
+                    </select>
+                  </div>
 
-                  <select
-                    value={loanRiskForm.MaritalStatus}
-                    onChange={(e) => handleLoanRiskSelectChange("MaritalStatus", e.target.value)}
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                  >
-                    <option>Single</option>
-                    <option>Married</option>
-                    <option>Divorced</option>
-                  </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                      Marital Status
+                    </label>
+                    <select
+                      value={loanRiskForm.MaritalStatus}
+                      onChange={(e) => handleLoanRiskSelectChange("MaritalStatus", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                    >
+                      <option>Single</option>
+                      <option>Married</option>
+                      <option>Divorced</option>
+                    </select>
+                  </div>
 
-                  <select
-                    value={loanRiskForm.HasMortgage}
-                    onChange={(e) => handleLoanRiskSelectChange("HasMortgage", e.target.value)}
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                  >
-                    <option>Yes</option>
-                    <option>No</option>
-                  </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                      Has Mortgage?
+                    </label>
+                    <select
+                      value={loanRiskForm.HasMortgage}
+                      onChange={(e) => handleLoanRiskSelectChange("HasMortgage", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                    >
+                      <option>Yes</option>
+                      <option>No</option>
+                    </select>
+                  </div>
 
-                  <select
-                    value={loanRiskForm.HasDependents}
-                    onChange={(e) => handleLoanRiskSelectChange("HasDependents", e.target.value)}
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                  >
-                    <option>Yes</option>
-                    <option>No</option>
-                  </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                      Has Dependents?
+                    </label>
+                    <select
+                      value={loanRiskForm.HasDependents}
+                      onChange={(e) => handleLoanRiskSelectChange("HasDependents", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                    >
+                      <option>Yes</option>
+                      <option>No</option>
+                    </select>
+                  </div>
 
-                  <select
-                    value={loanRiskForm.HasCoSigner}
-                    onChange={(e) => handleLoanRiskSelectChange("HasCoSigner", e.target.value)}
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                  >
-                    <option>Yes</option>
-                    <option>No</option>
-                  </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                      Has Co-Signer?
+                    </label>
+                    <select
+                      value={loanRiskForm.HasCoSigner}
+                      onChange={(e) => handleLoanRiskSelectChange("HasCoSigner", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                    >
+                      <option>Yes</option>
+                      <option>No</option>
+                    </select>
+                  </div>
                 </div>
 
-                <select
-                  value={loanRiskForm.LoanPurpose}
-                  onChange={(e) => handleLoanRiskSelectChange("LoanPurpose", e.target.value)}
-                  className="mt-2 w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
-                >
-                  <option>Home</option>
-                  <option>Business</option>
-                  <option>Education</option>
-                  <option>Auto</option>
-                  <option>Other</option>
-                </select>
+                <div className="mt-2">
+                  <label className="mb-1 block text-[11px] font-medium text-gray-600">
+                    Loan Purpose
+                  </label>
+                  <select
+                    value={loanRiskForm.LoanPurpose}
+                    onChange={(e) => handleLoanRiskSelectChange("LoanPurpose", e.target.value)}
+                    className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                  >
+                    <option>Home</option>
+                    <option>Business</option>
+                    <option>Education</option>
+                    <option>Auto</option>
+                    <option>Other</option>
+                  </select>
+                </div>
 
                 <button
                   onClick={handleLoanRiskPredict}
