@@ -108,6 +108,7 @@ type LoanRiskResult = {
   default_risk_probability?: number;
   risk_level?: string;
   explanation?: string;
+  top_risk_drivers?: string[];
   error?: string;
 };
 
@@ -1909,43 +1910,54 @@ export default function Home() {
                 </button>
 
                 {loanRiskResult && (
-                  <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
-                    {loanRiskResult.error ? (
-                      <p className="text-red-600">{loanRiskResult.error}</p>
-                    ) : (
-                      <div className="space-y-2">
-                        <p>
-                          <span className="font-medium">Prediction:</span>{" "}
-                          {loanRiskResult.prediction === 1 ? "Default Risk" : "Low Risk"}
-                        </p>
+  <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
+    {loanRiskResult.error ? (
+      <p className="text-red-600">{loanRiskResult.error}</p>
+    ) : (
+      <div className="space-y-2">
+        <p>
+          <span className="font-medium">Prediction:</span>{" "}
+          {loanRiskResult.prediction === 1 ? "Default Risk" : "Low Risk"}
+        </p>
 
-                        {typeof loanRiskResult.default_risk_probability === "number" && (
-                          <>
-                            <p>
-                              <span className="font-medium">Probability:</span>{" "}
-                              {(loanRiskResult.default_risk_probability * 100).toFixed(2)}%
-                            </p>
+        {typeof loanRiskResult.default_risk_probability === "number" && (
+          <p>
+            <span className="font-medium">Probability:</span>{" "}
+            {(loanRiskResult.default_risk_probability * 100).toFixed(2)}%
+          </p>
+        )}
 
-                            <p>
-                              <span className="font-medium">Risk Level:</span>{" "}
-                              {getRiskLevel(loanRiskResult.default_risk_probability)}
-                            </p>
+        <p>
+          <span className="font-medium">Risk Level:</span>{" "}
+          {loanRiskResult.risk_level ||
+            getRiskLevel(loanRiskResult.default_risk_probability || 0)}
+        </p>
 
-                            <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
-                              <p className="mb-1 font-medium text-gray-700">Why this result?</p>
-                              <p className="text-gray-600">
-                                {generateRiskExplanation(
-                                  loanRiskForm,
-                                  loanRiskResult.default_risk_probability
-                                )}
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+        <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+          <p className="mb-1 font-medium text-gray-700">Why this result?</p>
+          <p className="text-gray-600">
+            {loanRiskResult.explanation ||
+              generateRiskExplanation(
+                loanRiskForm,
+                loanRiskResult.default_risk_probability
+              )}
+          </p>
+        </div>
+
+        {loanRiskResult.top_risk_drivers?.length ? (
+          <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2">
+            <p className="mb-1 font-medium text-gray-700">Top Risk Drivers:</p>
+            <ul className="list-disc space-y-1 pl-4 text-gray-600">
+              {loanRiskResult.top_risk_drivers.map((driver, index) => (
+                <li key={index}>{driver}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    )}
+  </div>
+)}
               </div>
 
             </aside>
