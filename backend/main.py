@@ -1025,14 +1025,22 @@ async def loan_risk_prediction(data: LoanApplication):
     payload = data.dict()
     last_error = None
 
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            print(f"Calling ML API attempt {attempt + 1}/3")
+            print(f"Waking ML API attempt {attempt + 1}/4")
+
+            # Wake up Render service first
+            try:
+                requests.get(ML_API_URL, timeout=60)
+            except Exception as wake_error:
+                print("Wake-up request failed:", str(wake_error))
+
+            print(f"Calling ML predict attempt {attempt + 1}/4")
 
             response = requests.post(
                 f"{ML_API_URL}/predict",
                 json=payload,
-                timeout=90
+                timeout=120
             )
 
             response.raise_for_status()
@@ -1042,13 +1050,14 @@ async def loan_risk_prediction(data: LoanApplication):
             last_error = str(e)
             print(f"ML API attempt {attempt + 1} failed: {last_error}")
 
-            if attempt < 2:
-                print("Waiting before retry...")
-                time.sleep(8)
+            if attempt < 3:
+                wait_time = 10 * (attempt + 1)
+                print(f"Waiting {wait_time} seconds before retry...")
+                time.sleep(wait_time)
 
     raise HTTPException(
         status_code=502,
-        detail=f"ML API request failed after retries. ML service may still be waking up: {last_error}"
+        detail=f"ML API request failed after wake-up retries: {last_error}"
     )
 
 @app.get("/documents/{user_id}")
