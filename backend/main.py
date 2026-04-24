@@ -1015,22 +1015,41 @@ def health():
 
 
 @app.post("/loan-risk")
-def get_loan_risk(data: LoanApplication):
+async def loan_risk_prediction(data: LoanApplication):
     if not ML_API_URL:
-        raise HTTPException(status_code=500, detail="ML_API_URL is not configured")
-
-    try:
-        response = requests.post(
-            f"{ML_API_URL}/predict",
-            json=data.dict(),
-            timeout=30
+        raise HTTPException(
+            status_code=500,
+            detail="ML_API_URL is not configured"
         )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print("LOAN RISK API ERROR:", str(e))
-        raise HTTPException(status_code=502, detail=f"ML API request failed: {str(e)}")
 
+    payload = data.dict()
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            print(f"Calling ML API attempt {attempt + 1}/3")
+
+            response = requests.post(
+                f"{ML_API_URL}/predict",
+                json=payload,
+                timeout=90
+            )
+
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            print(f"ML API attempt {attempt + 1} failed: {last_error}")
+
+            if attempt < 2:
+                print("Waiting before retry...")
+                time.sleep(8)
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"ML API request failed after retries. ML service may still be waking up: {last_error}"
+    )
 
 @app.get("/documents/{user_id}")
 def get_documents(user_id: str):
