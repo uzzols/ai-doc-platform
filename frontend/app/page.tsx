@@ -953,16 +953,10 @@ export default function Home() {
   }
 
   try {
-    const res = await fetch(`${BACKEND_URL}/conversations/${user.id}`);
-    const data = await res.json();
+    // Refresh sidebar chat list first
+    const allConvos = await fetchConversations(searchText || undefined, true);
 
-    if (!res.ok || !Array.isArray(data)) {
-      setActiveConversationId("");
-      setHistory([]);
-      return;
-    }
-
-    const relatedConvos = data.filter(
+    const relatedConvos = allConvos.filter(
       (conversation: ConversationItem) => conversation.filename === filename
     );
 
@@ -972,7 +966,7 @@ export default function Home() {
       return;
     }
 
-    const sorted = relatedConvos.sort((a: ConversationItem, b: ConversationItem) => {
+    const sorted = relatedConvos.sort((a, b) => {
       const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
       const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
       return bTime - aTime;
