@@ -83,6 +83,7 @@ type ConversationItem = {
   share_token?: string | null;
 };
 
+
 type LoanRiskForm = {
   Age: string;
   Income: string;
@@ -200,6 +201,7 @@ function clearLastConversationId(userId: string) {
   localStorage.removeItem(getSavedConversationKey(userId));
 }
 
+
 function cleanNumericInput(value: string) {
   return value.replace(/,/g, "").trim();
 }
@@ -273,6 +275,41 @@ function validateLoanRiskForm(form: LoanRiskForm): LoanRiskErrors {
   return errors;
 }
 
+function getRiskLevel(probability: number) {
+  if (probability >= 0.9) return "Very High Risk 🚨";
+  if (probability >= 0.7) return "High Risk ⚠️";
+  if (probability >= 0.5) return "Moderate Risk";
+  return "Low Risk ✅";
+}
+
+function generateRiskExplanation(form: LoanRiskForm, probability?: number) {
+  const reasons: string[] = [];
+
+  const income = Number(cleanNumericInput(form.Income));
+  const loanAmount = Number(cleanNumericInput(form.LoanAmount));
+  const creditScore = Number(cleanNumericInput(form.CreditScore));
+  const dti = Number(cleanNumericInput(form.DTIRatio));
+  const interestRate = Number(cleanNumericInput(form.InterestRate));
+  const monthsEmployed = Number(cleanNumericInput(form.MonthsEmployed));
+
+  if (dti >= 35) reasons.push("high debt-to-income ratio");
+  if (interestRate >= 10) reasons.push("high interest rate");
+  if (creditScore < 620) reasons.push("lower credit score");
+  if (income < 40000) reasons.push("lower annual income");
+  if (income > 0 && loanAmount > income * 4) reasons.push("loan amount is high compared with income");
+  if (monthsEmployed < 12) reasons.push("short employment history");
+
+  if (reasons.length === 0) {
+    if ((probability || 0) < 0.5) {
+      return "This application appears lower risk based on the provided income, credit, employment, and loan details.";
+    }
+
+    return "The model shows some risk, but no single input strongly stands out. Review the full borrower profile before making a decision.";
+  }
+
+  return `Risk is elevated due to ${reasons.join(", ")}.`;
+}
+
 export default function Home() {
   const { isSignedIn, user } = useUser();
 
@@ -299,6 +336,7 @@ export default function Home() {
   const [selectedDocument, setSelectedDocument] = useState("");
   const [activeConversationId, setActiveConversationId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
 
   const [loanRiskLoading, setLoanRiskLoading] = useState(false);
   const [loanRiskResult, setLoanRiskResult] = useState<LoanRiskResult | null>(null);
@@ -377,6 +415,7 @@ export default function Home() {
     if (sortedHistory.length === 0) return null;
     return sortedHistory[sortedHistory.length - 1];
   }, [sortedHistory]);
+
 
   const loanRiskIsValid = useMemo(() => {
     const errors = validateLoanRiskForm(loanRiskForm);
@@ -825,6 +864,8 @@ export default function Home() {
     }
   };
 
+
+
   const handleLoanRiskNumberChange = (field: keyof LoanRiskForm, value: string) => {
     const cleaned = value.replace(/[^\d.]/g, "");
     setLoanRiskForm((prev) => ({
@@ -937,52 +978,51 @@ export default function Home() {
     await fetchHistory(conversation.id);
   };
 
- const handleDocumentChange = async (filename: string) => {
-  setSelectedDocument(filename);
-  setQuestion("");
-  setAnswer("");
-  setDisplayedAnswer("");
-  setShareLink("");
-  setPendingAction(null);
-  setSelectedSheetIndex(0);
+  const handleDocumentChange = async (filename: string) => {
+    setSelectedDocument(filename);
+    setQuestion("");
+    setAnswer("");
+    setDisplayedAnswer("");
+    setShareLink("");
+    setPendingAction(null);
+    setSelectedSheetIndex(0);
 
-  if (!filename || !user?.id) {
-    setActiveConversationId("");
-    setHistory([]);
-    return;
-  }
-
-  try {
-    // Refresh sidebar chat list first
-    const allConvos = await fetchConversations(searchText || undefined, true);
-
-    const relatedConvos = allConvos.filter(
-      (conversation: ConversationItem) => conversation.filename === filename
-    );
-
-    if (relatedConvos.length === 0) {
+    if (!filename || !user?.id) {
       setActiveConversationId("");
       setHistory([]);
       return;
     }
 
-    const sorted = relatedConvos.sort((a, b) => {
-      const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-      const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-      return bTime - aTime;
-    });
+    try {
+      const allConvos = await fetchConversations(searchText || undefined, true);
 
-    const latest = sorted[0];
+      const relatedConvos = allConvos.filter(
+        (conversation: ConversationItem) => conversation.filename === filename
+      );
 
-    setActiveConversationId(latest.id);
-    saveLastConversationId(user.id, latest.id);
-    await fetchHistory(latest.id);
-  } catch (error) {
-    console.error("Chat history load failed:", error);
-    setActiveConversationId("");
-    setHistory([]);
-  }
-};
+      if (relatedConvos.length === 0) {
+        setActiveConversationId("");
+        setHistory([]);
+        return;
+      }
+
+      const sorted = [...relatedConvos].sort((a, b) => {
+        const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return bTime - aTime;
+      });
+
+      const latest = sorted[0];
+
+      setActiveConversationId(latest.id);
+      saveLastConversationId(user.id, latest.id);
+      await fetchHistory(latest.id);
+    } catch (error) {
+      console.error("Chat history load failed:", error);
+      setActiveConversationId("");
+      setHistory([]);
+    }
+  };
 
   const handleNewChat = async () => {
     if (!selectedDocument) {
@@ -1235,6 +1275,8 @@ export default function Home() {
       alert("Failed to export snapshot");
     }
   };
+
+
 
   const renderLoanInput = (
     field: keyof LoanRiskForm,
@@ -1681,6 +1723,7 @@ export default function Home() {
                 )}
               </div>
 
+
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
                 <div className="mb-3 text-sm font-medium text-gray-800">
                   Loan Risk Predictor
@@ -1870,34 +1913,41 @@ export default function Home() {
                     {loanRiskResult.error ? (
                       <p className="text-red-600">{loanRiskResult.error}</p>
                     ) : (
-                      <div className="space-y-1">
+                      <div className="space-y-2">
                         <p>
                           <span className="font-medium">Prediction:</span>{" "}
                           {loanRiskResult.prediction === 1 ? "Default Risk" : "Low Risk"}
                         </p>
 
                         {typeof loanRiskResult.default_risk_probability === "number" && (
-                          <p>
-                            <span className="font-medium">Probability:</span>{" "}
-                            {(loanRiskResult.default_risk_probability * 100).toFixed(2)}%
-                          </p>
-                        )}
+                          <>
+                            <p>
+                              <span className="font-medium">Probability:</span>{" "}
+                              {(loanRiskResult.default_risk_probability * 100).toFixed(2)}%
+                            </p>
 
-                        {loanRiskResult.risk_level && (
-                          <p>
-                            <span className="font-medium">Risk Level:</span>{" "}
-                            {loanRiskResult.risk_level}
-                          </p>
-                        )}
+                            <p>
+                              <span className="font-medium">Risk Level:</span>{" "}
+                              {getRiskLevel(loanRiskResult.default_risk_probability)}
+                            </p>
 
-                        {loanRiskResult.explanation && (
-                          <p className="text-gray-600">{loanRiskResult.explanation}</p>
+                            <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+                              <p className="mb-1 font-medium text-gray-700">Why this result?</p>
+                              <p className="text-gray-600">
+                                {generateRiskExplanation(
+                                  loanRiskForm,
+                                  loanRiskResult.default_risk_probability
+                                )}
+                              </p>
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
                   </div>
                 )}
               </div>
+
             </aside>
           )}
 
