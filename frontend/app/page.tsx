@@ -1337,7 +1337,7 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="flex w-[340px] flex-col border-r border-gray-200 bg-white p-3">
+            <aside className="flex w-[340px] flex-col overflow-y-auto border-r border-gray-200 bg-white p-3">
               <div className="mb-3">
                 <button
                   onClick={handleNewChat}
@@ -1430,7 +1430,7 @@ export default function Home() {
 
               <div className="mb-2 text-sm font-medium text-gray-800">All chats</div>
 
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-[260px] min-h-[160px] space-y-2 overflow-y-auto pr-1">
                 {sortedConversations.length === 0 ? (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
                     No chats yet
