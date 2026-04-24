@@ -937,34 +937,58 @@ export default function Home() {
     await fetchHistory(conversation.id);
   };
 
-  const handleDocumentChange = async (filename: string) => {
-    setSelectedDocument(filename);
-    setQuestion("");
-    setAnswer("");
-    setDisplayedAnswer("");
-    setShareLink("");
-    setPendingAction(null);
-    setSelectedSheetIndex(0);
+ const handleDocumentChange = async (filename: string) => {
+  setSelectedDocument(filename);
+  setQuestion("");
+  setAnswer("");
+  setDisplayedAnswer("");
+  setShareLink("");
+  setPendingAction(null);
+  setSelectedSheetIndex(0);
 
-    if (!filename) {
+  if (!filename || !user?.id) {
+    setActiveConversationId("");
+    setHistory([]);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/conversations/${user.id}`);
+    const data = await res.json();
+
+    if (!res.ok || !Array.isArray(data)) {
       setActiveConversationId("");
       setHistory([]);
       return;
     }
 
-    const matchingConversation = sortedConversations.find(
-      (conversation) => conversation.filename === filename
+    const relatedConvos = data.filter(
+      (conversation: ConversationItem) => conversation.filename === filename
     );
 
-    if (matchingConversation) {
-      setActiveConversationId(matchingConversation.id);
-      saveLastConversationId(user!.id, matchingConversation.id);
-      await fetchHistory(matchingConversation.id);
-    } else {
+    if (relatedConvos.length === 0) {
       setActiveConversationId("");
       setHistory([]);
+      return;
     }
-  };
+
+    const sorted = relatedConvos.sort((a: ConversationItem, b: ConversationItem) => {
+      const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const bTime = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    const latest = sorted[0];
+
+    setActiveConversationId(latest.id);
+    saveLastConversationId(user.id, latest.id);
+    await fetchHistory(latest.id);
+  } catch (error) {
+    console.error("Chat history load failed:", error);
+    setActiveConversationId("");
+    setHistory([]);
+  }
+};
 
   const handleNewChat = async () => {
     if (!selectedDocument) {
