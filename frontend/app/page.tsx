@@ -1352,25 +1352,30 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen bg-[#f7f7f8] text-gray-900">
+    <main className="h-screen overflow-hidden bg-[#f5f7fb] text-slate-950">
       {!isSignedIn ? (
-        <div className="flex h-screen items-center justify-center p-6">
-          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
-            <h1 className="mb-2 text-2xl font-bold">AI Document Platform</h1>
-            <p className="mb-6 text-gray-600">
+        <div className="flex h-screen items-center justify-center bg-[radial-gradient(circle_at_top,#e0ecff,transparent_38%)] p-6">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/95 p-8 shadow-xl shadow-slate-200/60">
+            <div className="mb-6 inline-flex rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+              Document intelligence workspace
+            </div>
+            <h1 className="mb-2 text-3xl font-semibold tracking-tight text-slate-950">
+              AI Document Platform
+            </h1>
+            <p className="mb-7 text-sm leading-6 text-slate-600">
               Sign in to upload documents and chat with your files.
             </p>
 
             <div className="flex gap-3">
               <Link
                 href="/sign-in"
-                className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-2 text-center hover:bg-gray-50"
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-center text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
               >
                 Sign In
               </Link>
               <Link
                 href="/sign-up"
-                className="flex-1 rounded-lg bg-black px-4 py-2 text-center text-white hover:bg-gray-800"
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-center text-sm font-medium text-white shadow-sm shadow-blue-200 transition hover:bg-blue-700"
               >
                 Sign Up
               </Link>
@@ -1380,31 +1385,34 @@ export default function Home() {
       ) : (
         <div className="flex h-screen">
           {sidebarOpen && (
-            <aside className="flex w-[340px] flex-col overflow-y-auto border-r border-gray-200 bg-white p-3">
-              <div className="mb-3">
+            <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white/90 p-4 shadow-sm">
+              <div className="mb-4">
                 <button
                   onClick={handleNewChat}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left text-sm hover:bg-gray-50"
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 text-left text-sm font-semibold text-white shadow-sm shadow-blue-200 transition hover:bg-blue-700"
                 >
                   + New chat
                 </button>
               </div>
 
-              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                <p className="mb-2 text-sm font-medium text-gray-800">Upload file</p>
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <p className="mb-1 text-sm font-semibold text-slate-900">Upload file</p>
+                <p className="mb-3 text-xs leading-5 text-slate-500">
+                  Add PDFs, spreadsheets, images, or docs.
+                </p>
 
                 <input
                   type="file"
                   accept=".pdf,.csv,.txt,.docx,.xlsx,.png,.jpg,.jpeg,.webp"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="mb-3 w-full text-xs text-gray-700"
+                  className="mb-3 w-full rounded-lg border border-dashed border-slate-300 bg-white p-2 text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white"
                 />
 
                 <div className="flex gap-2">
                   <button
                     onClick={handleUpload}
                     disabled={uploading}
-                    className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800 disabled:opacity-70"
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-700 disabled:opacity-60"
                   >
                     {uploading ? "Uploading..." : "Upload"}
                   </button>
@@ -1414,23 +1422,23 @@ export default function Home() {
                       setFile(null);
                       setMessage("");
                     }}
-                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
                   >
                     Clear
                   </button>
                 </div>
 
-                {message && <p className="mt-3 text-xs text-gray-600">{message}</p>}
+                {message && <p className="mt-3 text-xs leading-5 text-slate-600">{message}</p>}
               </div>
 
-              <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                <label className="mb-2 block text-sm font-medium text-gray-800">
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <label className="mb-2 block text-sm font-semibold text-slate-900">
                   Current document for new chat
                 </label>
                 <select
                   value={selectedDocument}
                   onChange={(e) => handleDocumentChange(e.target.value)}
-                  className="mb-3 w-full rounded-lg border border-gray-200 bg-white p-2.5 text-xs text-gray-900"
+                  className="mb-3 w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 >
                   {sortedDocuments.length === 0 ? (
                     <option value="">No documents uploaded</option>
@@ -1450,7 +1458,7 @@ export default function Home() {
                   <button
                     onClick={handleDeleteDocument}
                     disabled={!selectedDocument}
-                    className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
                   >
                     Delete document
                   </button>
@@ -1467,15 +1475,18 @@ export default function Home() {
                     setSearchText(value);
                     await fetchConversations(value || undefined, false);
                   }}
-                  className="w-full rounded-lg border border-gray-200 bg-white p-2.5 text-sm text-gray-900 outline-none"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
 
-              <div className="mb-2 text-sm font-medium text-gray-800">All chats</div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-semibold text-slate-900">All chats</div>
+                <div className="text-xs text-slate-400">{sortedConversations.length}</div>
+              </div>
 
               <div className="max-h-[260px] min-h-[160px] space-y-2 overflow-y-auto pr-1">
                 {sortedConversations.length === 0 ? (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm leading-6 text-slate-500">
                     No chats yet
                   </div>
                 ) : (
@@ -1484,8 +1495,8 @@ export default function Home() {
                       key={conversation.id}
                       className={`rounded-xl border p-3 transition ${
                         activeConversationId === conversation.id
-                          ? "border-black bg-black text-white"
-                          : "border-gray-200 bg-white hover:bg-gray-50"
+                          ? "border-blue-600 bg-blue-600 text-white shadow-sm shadow-blue-200"
+                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
                       }`}
                     >
                       {renamingConversationId === conversation.id ? (
@@ -1493,12 +1504,12 @@ export default function Home() {
                           <input
                             value={renameValue}
                             onChange={(e) => setRenameValue(e.target.value)}
-                            className="w-full rounded-lg border border-gray-300 bg-white p-2 text-sm text-black outline-none"
+                            className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-950 outline-none"
                           />
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleRenameConversation(conversation.id)}
-                              className="rounded-lg bg-white px-2 py-1 text-xs text-black"
+                              className="rounded-lg bg-white px-2 py-1 text-xs font-medium text-slate-900"
                             >
                               Save
                             </button>
@@ -1507,7 +1518,7 @@ export default function Home() {
                                 setRenamingConversationId("");
                                 setRenameValue("");
                               }}
-                              className="rounded-lg bg-white px-2 py-1 text-xs text-black"
+                              className="rounded-lg bg-white px-2 py-1 text-xs font-medium text-slate-900"
                             >
                               Cancel
                             </button>
@@ -1542,7 +1553,7 @@ export default function Home() {
                               className={`text-[11px] ${
                                 activeConversationId === conversation.id
                                   ? "text-gray-300 hover:text-white"
-                                  : "text-gray-500 hover:text-black"
+                                  : "text-slate-500 hover:text-slate-950"
                               }`}
                             >
                               Rename
@@ -1553,7 +1564,7 @@ export default function Home() {
                               className={`text-[11px] ${
                                 activeConversationId === conversation.id
                                   ? "text-gray-300 hover:text-white"
-                                  : "text-gray-500 hover:text-black"
+                                  : "text-slate-500 hover:text-slate-950"
                               }`}
                             >
                               Share
@@ -1564,7 +1575,7 @@ export default function Home() {
                               className={`text-[11px] ${
                                 activeConversationId === conversation.id
                                   ? "text-gray-300 hover:text-white"
-                                  : "text-gray-500 hover:text-black"
+                                  : "text-slate-500 hover:text-slate-950"
                               }`}
                             >
                               Delete
@@ -1577,23 +1588,27 @@ export default function Home() {
                 )}
               </div>
 
-              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                 <button
                   onClick={() => setShowInsights((prev) => !prev)}
-                  className="flex w-full items-center justify-between text-sm font-medium text-gray-800"
+                  className="flex w-full items-center justify-between text-sm font-semibold text-slate-900"
                 >
                   <span>Document Insights</span>
-                  <span>{showInsights ? "Hide" : "Show"}</span>
+                  <span className="text-xs font-medium text-slate-500">
+                    {showInsights ? "Hide" : "Show"}
+                  </span>
                 </button>
 
                 {showInsights && (
                   <div className="mt-3" ref={insightsRef}>
                     {!selectedDocumentMeta ? (
-                      <p className="text-xs text-gray-500">Select a document to see insights.</p>
+                      <p className="text-xs leading-5 text-slate-500">
+                        Select a document to see insights.
+                      </p>
                     ) : (
                       <div className="space-y-4 text-xs">
-                        <div className="rounded-lg border border-gray-200 bg-white p-3">
-                          <div className="mb-2 text-sm font-medium text-gray-800">
+                        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100">
+                          <div className="mb-2 text-sm font-semibold text-slate-900">
                             Client-ready exports
                           </div>
 
@@ -1601,7 +1616,7 @@ export default function Home() {
                             <button
                               onClick={handleExportExcel}
                               disabled={!selectedDocument}
-                              className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800 disabled:opacity-50"
+                              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-700 disabled:opacity-50"
                             >
                               Download Excel
                             </button>
@@ -1609,7 +1624,7 @@ export default function Home() {
                             <button
                               onClick={handleExportPdf}
                               disabled={!selectedDocument}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
                             >
                               Download PDF
                             </button>
@@ -1617,7 +1632,7 @@ export default function Home() {
                             <button
                               onClick={handleExportDocx}
                               disabled={!selectedDocument}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
                             >
                               Download DOCX
                             </button>
@@ -1625,15 +1640,15 @@ export default function Home() {
                             <button
                               onClick={handleDownloadSnapshot}
                               disabled={!selectedDocument}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs hover:bg-gray-100 disabled:opacity-50"
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
                             >
                               Download Snapshot
                             </button>
                           </div>
                         </div>
 
-                        <div className="rounded-lg border border-gray-200 bg-white p-3">
-                          <div className="mb-2 font-medium text-gray-800">Document info</div>
+                        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100">
+                          <div className="mb-2 font-semibold text-slate-900">Document info</div>
                           <div className="space-y-1">
                             <p>
                               <span className="font-medium">Filename:</span>{" "}
@@ -1655,14 +1670,14 @@ export default function Home() {
                         </div>
 
                         {isSpreadsheetFile(selectedDocumentMeta.file_type) && (
-                          <div className="rounded-lg border border-gray-200 bg-white p-3">
-                            <div className="mb-2 font-medium text-gray-800">Workbook preview</div>
+                          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100">
+                            <div className="mb-2 font-semibold text-slate-900">Workbook preview</div>
 
                             {spreadsheetSheets.length > 0 && (
                               <select
                                 value={selectedSheetIndex}
                                 onChange={(e) => setSelectedSheetIndex(Number(e.target.value))}
-                                className="mb-3 w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
+                                className="mb-3 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                               >
                                 {spreadsheetSheets.map((sheet, index) => (
                                   <option key={`${sheet.sheet_name}-${index}`} value={index}>
@@ -1677,10 +1692,10 @@ export default function Home() {
                                 {selectedSheet.kpis.cards.slice(0, 6).map((card, idx) => (
                                   <div
                                     key={`${card.label}-${idx}`}
-                                    className="rounded-md border border-gray-200 bg-gray-50 p-2"
+                                    className="rounded-md border border-slate-200 bg-slate-50 p-2"
                                   >
-                                    <p className="text-[11px] text-gray-500">{card.label}</p>
-                                    <p className="font-semibold text-gray-800">{card.value}</p>
+                                    <p className="text-[11px] text-slate-500">{card.label}</p>
+                                    <p className="font-semibold text-slate-900">{card.value}</p>
                                   </div>
                                 ))}
                               </div>
@@ -1689,9 +1704,9 @@ export default function Home() {
                         )}
 
                         {!isSpreadsheetFile(selectedDocumentMeta.file_type) && (
-                          <div className="rounded-lg border border-gray-200 bg-white p-3">
-                            <div className="mb-2 font-medium text-gray-800">Summary</div>
-                            <p className="whitespace-pre-wrap text-gray-700">
+                          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100">
+                            <div className="mb-2 font-semibold text-slate-900">Summary</div>
+                            <p className="whitespace-pre-wrap text-slate-700">
                               {selectedDocumentMeta.extracted_data?.preview?.summary ||
                                 "No summary available"}
                             </p>
@@ -1699,18 +1714,18 @@ export default function Home() {
                         )}
 
                         {structuredEntries.length > 0 && (
-                          <div className="rounded-lg border border-gray-200 bg-white p-3">
-                            <div className="mb-2 font-medium text-gray-800">Structured fields</div>
+                          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm shadow-slate-100">
+                            <div className="mb-2 font-semibold text-slate-900">Structured fields</div>
                             <div className="space-y-2">
                               {structuredEntries.slice(0, 12).map(([key, value]) => (
                                 <div
                                   key={key}
-                                  className="rounded-md border border-gray-200 bg-gray-50 p-2"
+                                  className="rounded-md border border-slate-200 bg-slate-50 p-2"
                                 >
-                                  <p className="text-[11px] font-medium text-gray-500">
+                                  <p className="text-[11px] font-medium text-slate-500">
                                     {formatFieldLabel(key)}
                                   </p>
-                                  <p className="whitespace-pre-wrap text-gray-800">
+                                  <p className="whitespace-pre-wrap text-slate-800">
                                     {renderFieldValue(value)}
                                   </p>
                                 </div>
@@ -1725,8 +1740,8 @@ export default function Home() {
               </div>
 
 
-              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                <div className="mb-3 text-sm font-medium text-gray-800">
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="mb-3 text-sm font-semibold text-slate-900">
                   Loan Risk Predictor
                 </div>
 
@@ -1804,8 +1819,8 @@ export default function Home() {
                       className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs"
                     >
                       <option>High School</option>
-                      <option>Bachelor's</option>
-                      <option>Master's</option>
+                      <option>{"Bachelor's"}</option>
+                      <option>{"Master's"}</option>
                       <option>PhD</option>
                     </select>
                   </div>
@@ -1963,21 +1978,23 @@ export default function Home() {
             </aside>
           )}
 
-          <section className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+          <section className="flex min-w-0 flex-1 flex-col bg-[#f5f7fb]">
+            <header className="flex items-center justify-between border-b border-slate-200 bg-white/90 px-5 py-3.5 shadow-sm backdrop-blur">
               <div className="flex items-center gap-3">
                 {!sidebarOpen && (
                   <button
                     onClick={() => setSidebarOpen(true)}
-                    className="rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-100"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                   >
                     ☰
                   </button>
                 )}
 
                 <div>
-                  <h1 className="text-lg font-semibold">AI Document Platform</h1>
-                  <p className="text-xs text-gray-500">
+                  <h1 className="text-lg font-semibold tracking-tight text-slate-950">
+                    AI Document Platform
+                  </h1>
+                  <p className="mt-0.5 max-w-[520px] truncate text-xs text-slate-500">
                     {selectedDocument ? `Current file: ${selectedDocument}` : "No file selected"}
                   </p>
                 </div>
@@ -1986,7 +2003,7 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSidebarOpen((prev) => !prev)}
-                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-100"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                 >
                   {sidebarOpen ? "Hide panel" : "Show panel"}
                 </button>
@@ -1997,42 +2014,60 @@ export default function Home() {
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-6">
                 {shareLink && (
-                  <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900 shadow-sm">
                     Share link copied:
-                    <div className="mt-2 break-all text-xs text-gray-500">{shareLink}</div>
+                    <div className="mt-2 break-all text-xs text-blue-700">{shareLink}</div>
                   </div>
                 )}
 
                 {sortedHistory.length === 0 && !loading && !displayedAnswer && (
-                  <div className="mt-20 text-center">
-                    <h2 className="mb-3 text-4xl font-semibold text-gray-900">
+                  <div className="mx-auto mt-16 max-w-2xl text-center">
+                    <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-xl font-semibold text-blue-700">
+                      AI
+                    </div>
+                    <h2 className="mb-3 text-4xl font-semibold tracking-tight text-slate-950">
                       Ask your document anything
                     </h2>
-                    <p className="text-gray-500">
+                    <p className="mx-auto max-w-xl text-sm leading-6 text-slate-500">
                       {selectedDocument
                         ? activeConversationId
                           ? "This conversation is empty. Ask your first question."
                           : "Choose New chat to start with the selected document, or open any previous chat from the sidebar."
                         : "Select a document for a new chat, or open a previous chat from the sidebar."}
                     </p>
+                    <div className="mt-8 grid gap-3 text-left sm:grid-cols-3">
+                      {[
+                        "Summarize the key points",
+                        "Extract important fields",
+                        "Create a client-ready report",
+                      ].map((prompt) => (
+                        <button
+                          key={prompt}
+                          onClick={() => setQuestion(prompt)}
+                          className="rounded-xl border border-slate-200 bg-white p-4 text-sm font-medium text-slate-700 shadow-sm shadow-slate-100 transition hover:border-blue-200 hover:bg-blue-50"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {sortedHistory.map((item, index) => (
                   <div key={item.id || `${item.question}-${index}`} className="space-y-4">
                     <div className="flex justify-end">
-                      <div className="max-w-[75%] rounded-3xl bg-black px-5 py-4 text-white">
+                      <div className="max-w-[75%] rounded-2xl rounded-br-md bg-blue-600 px-5 py-4 text-white shadow-sm shadow-blue-200">
                         <p className="whitespace-pre-wrap text-sm leading-6">{item.question}</p>
                       </div>
                     </div>
 
                     <div className="flex justify-start">
-                      <div className="max-w-[92%] rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                      <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-slate-200 bg-white px-5 py-4 shadow-sm shadow-slate-100">
+                        <p className="mb-2 text-xs font-semibold uppercase text-slate-500">
                           AI
                         </p>
 
-                        <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800">
                           {item.answer}
                         </p>
 
@@ -2041,7 +2076,7 @@ export default function Home() {
                             {pendingAction === "pdf" && (
                               <button
                                 onClick={handleExportPdf}
-                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
                               >
                                 Download PDF
                               </button>
@@ -2050,7 +2085,7 @@ export default function Home() {
                             {pendingAction === "excel" && (
                               <button
                                 onClick={handleExportExcel}
-                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
                               >
                                 Download Excel
                               </button>
@@ -2059,7 +2094,7 @@ export default function Home() {
                             {pendingAction === "docx" && (
                               <button
                                 onClick={handleExportDocx}
-                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
                               >
                                 Download DOCX
                               </button>
@@ -2068,7 +2103,7 @@ export default function Home() {
                             {pendingAction === "snapshot" && (
                               <button
                                 onClick={handleDownloadSnapshot}
-                                className="rounded-lg bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
                               >
                                 Download Snapshot
                               </button>
@@ -2076,7 +2111,7 @@ export default function Home() {
                           </div>
                         )}
 
-                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
                           {item.created_at && <span>{formatDate(item.created_at)}</span>}
                           {item.filename && <span>{item.filename}</span>}
                         </div>
@@ -2087,8 +2122,8 @@ export default function Home() {
 
                 {loading && (
                   <div className="flex justify-start">
-                    <div className="rounded-3xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    <div className="rounded-2xl rounded-bl-md border border-slate-200 bg-white px-5 py-4 shadow-sm shadow-slate-100">
+                      <p className="mb-2 text-xs font-semibold uppercase text-slate-500">
                         AI
                       </p>
                       <LoadingDots />
@@ -2100,9 +2135,9 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="border-t border-gray-200 bg-white px-4 py-4">
+            <div className="border-t border-slate-200 bg-white/90 px-4 py-4 shadow-[0_-10px_30px_rgba(15,23,42,0.04)] backdrop-blur">
               <div className="mx-auto max-w-5xl">
-                <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-lg shadow-slate-200/60">
                   <textarea
                     ref={inputRef}
                     value={question}
@@ -2115,11 +2150,11 @@ export default function Home() {
                     }}
                     placeholder="Ask something about your document..."
                     rows={3}
-                    className="w-full resize-none border-0 bg-transparent text-sm outline-none"
+                    className="w-full resize-none border-0 bg-transparent text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400"
                   />
 
                   <div className="mt-3 flex items-center justify-between">
-                    <p className="text-xs text-gray-500">
+                    <p className="max-w-[70%] truncate text-xs text-slate-500">
                       {selectedDocument
                         ? `Selected: ${selectedDocument}`
                         : "Select a document to start"}
@@ -2128,7 +2163,7 @@ export default function Home() {
                     <button
                       onClick={handleAsk}
                       disabled={loading || !question.trim()}
-                      className="rounded-xl bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-50"
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-blue-200 transition hover:bg-blue-700 disabled:opacity-50"
                     >
                       {loading ? "Thinking..." : "Send"}
                     </button>
